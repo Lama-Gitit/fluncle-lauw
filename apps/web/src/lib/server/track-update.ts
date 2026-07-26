@@ -536,11 +536,14 @@ export async function updateTrack(
     // treats a cleared row as un-embedded (re-embed on the next tick). `vector32(NULL)`
     // throws, hence the two arms rather than one expression. The handler has already
     // validated the 1024-d shape (`coerceEmbedding`), so `vector32()` cannot see garbage.
+    // `has_embedding` moves in the SAME statement, on both arms — the stored mirror the funnel's
+    // covering scan reads (schema.ts § `has_embedding`). A literal, not a bind: it is derived from
+    // which arm we are on, never from caller input.
     if (update.embedding === "") {
-      sets.push("embedding_blob = ?");
+      sets.push("embedding_blob = ?", "has_embedding = 0");
       args.push(null);
     } else {
-      sets.push("embedding_blob = vector32(?)");
+      sets.push("embedding_blob = vector32(?)", "has_embedding = 1");
       args.push(update.embedding);
     }
   }

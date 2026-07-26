@@ -172,6 +172,34 @@ export async function seedCatalogueTrack(
   });
 }
 
+/**
+ * THE EMBED WRITE, as the pipeline performs it — the ranked `F32_BLOB` AND its `has_embedding`
+ * mirror, together (schema.ts § `has_embedding`). Fixtures must go through this rather than a bare
+ * `set embedding_blob = vector32(?)`: the mirror is what `/admin/funnel`'s covering stage scan reads,
+ * so a fixture that writes only the blob seeds a state production cannot reach, and the funnel's
+ * fold-equivalence test rightly fails on it. Pass `null` to CLEAR both halves (the quarantine paths'
+ * `CLEAR_EMBEDDING_SQL`).
+ */
+export async function seedEmbedding(
+  client: Client,
+  trackId: string,
+  vector: null | number[],
+): Promise<void> {
+  if (vector === null) {
+    await client.execute({
+      args: [trackId],
+      sql: `update tracks set embedding_blob = null, has_embedding = 0 where track_id = ?`,
+    });
+
+    return;
+  }
+
+  await client.execute({
+    args: [JSON.stringify(vector), trackId],
+    sql: `update tracks set embedding_blob = vector32(?), has_embedding = 1 where track_id = ?`,
+  });
+}
+
 type SeedEntity = {
   id: string;
   name?: string;

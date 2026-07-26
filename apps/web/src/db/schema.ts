@@ -296,6 +296,45 @@ export const tracks = sqliteTable(
     // raw-blob probe binding.
     embeddingBlob: float32Vector("embedding_blob"),
     featuresJson: text("features_json"),
+    // THE EMBEDDING-PRESENCE MIRROR (docs/db-scale-backlog Wave 2 #4, the column half). `1` iff
+    // `embedding_blob IS NOT NULL`, maintained in the SAME `UPDATE` as the vector itself.
+    //
+    // WHY A STORED MIRROR AND NOT THE TEST ITSELF. `embedding_blob` is a ~4 KB
+    // `F32_BLOB(1024)` that spills to overflow pages, and SQLite must WALK that overflow
+    // chain to reach any column stored after it in the record. So a scan whose predicates
+    // read `dismissed_at` / `nearest_finding_score` / `spotify_anchor_attempted_at` / `isrc`
+    // pays for the vector it never selects: measured 2026-07-26 on hosted prod, the
+    // `/admin/funnel` stage scan ran 9.5s cold against 0.38s warm, and three post-blob
+    // columns cost 3.32s where three pre-blob columns cost 0.23s. Testing `embedding_blob IS
+    // NOT NULL` is itself cheap (null-ness reads the record header) — the cost is SKIPPING
+    // PAST the blob, so no amount of care with the vector column fixes it. Mirroring the flag
+    // lets `tracks_funnel_scan_idx` COVER the whole scan, which never touches a table row and
+    // so never touches an overflow page: on a 54,860-row prod clone that is a 5 MB index against a
+    // 125 MB table, and the scan went 12.6-19.9s cold → 1.70s first-touch, 0.30s after.
+    //
+    // WHY NOT A GENERATED COLUMN. A `VIRTUAL` generated column mirroring the same expression
+    // was measured and REJECTED: the planner will not treat an index over it as covering, so
+    // the scan fell back to the table and ran 12-15s — 3× WORSE than the join form. An index
+    // on the raw EXPRESSION is never chosen at all, and a partial index `WHERE embedding_blob
+    // IS NOT NULL` plans as `USING INDEX`, not `USING COVERING INDEX`, because the query's own
+    // reference to the blob column defeats coverage. A plain stored column is the only shape
+    // the planner covers.
+    //
+    // THE INVARIANT, AND WHY IT CANNOT DRIFT. There are exactly four writers of
+    // `embedding_blob` (the agent-tier `update_track` set/clear arms, and three catalogue
+    // quarantine paths that null it), and every one of them assigns this column in the SAME
+    // statement — the clears through the shared `CLEAR_EMBEDDING_SQL` fragment
+    // (lib/server/embedding.ts), so the pair cannot be written apart. `embedding-mirror.test.ts`
+    // scans the source and FAILS the build on any `embedding_blob =` assignment that does not
+    // carry one, and the funnel's fold-equivalence test pins the mirror against the live
+    // `embedding_blob IS NOT NULL` reference query on fixtures. INTERNAL bookkeeping: never in
+    // a public DTO, never a lastmod bump.
+    //
+    // NOTE ON PHYSICAL POSITION: `ALTER TABLE ADD COLUMN` appends to the end of the record, so
+    // on an existing database this column sits LAST (after the blob); a freshly created table
+    // places it here, alphabetically (before it). Neither matters — the covering index is what
+    // the scan reads, and no hot path reads this column off a table row.
+    hasEmbedding: integer("has_embedding", { mode: "boolean" }).notNull().default(false),
     // The Discogs release the finding resolves to (read-only enrichment, best-effort,
     // matched by artist + title since Discogs has no ISRC search). inMasterId is the
     // master that groups a release's versions (Discogs returns it on the search hit);
@@ -493,6 +532,56 @@ export const tracks = sqliteTable(
     index("tracks_is_catalogue_idx")
       .on(table.isCatalogue)
       .where(sql`${table.isCatalogue} = 1`),
+    // THE FUNNEL STAGE SCAN, COVERED (docs/db-scale-backlog Wave 2 #7). `/admin/funnel`'s
+    // folded pass (`runFoldedFunnelScan`) is one conditional aggregate over the WHOLE catalogue —
+    // twelve `SUM(CASE)` arms, no WHERE to seek on — so it is a full scan by construction and the
+    // only lever left is HOW MANY BYTES the scan touches. Every column those arms read is here, in
+    // one index, so the planner reads `SCAN tracks USING COVERING INDEX` and never fetches a table
+    // row. Measured on a 54,860-row clone of production (hosted Turso, 2026-07-26): 12.6-19.9s cold
+    // before, 1.70s first-touch and 0.30s after, reading a 5 MB index instead of a 125 MB table —
+    // with all twelve counts identical by construction, being the same predicates read off the two
+    // mirrors. Without this the scan drags every 4 KB vector's overflow pages to reach the post-blob
+    // columns (see `has_embedding`).
+    //
+    // WHY IT LEADS WITH `is_catalogue`, AND WHY THAT IS LOAD-BEARING: a leading `is_catalogue`
+    // makes this index both seekable and covering for the per-stage catalogue reads, which is what
+    // lets the planner PREFER it. Measured: with `is_catalogue` demoted to a partial `where` clause
+    // instead, the planner picked the narrower `tracks_is_catalogue_idx` seek and fell back to table
+    // rows — losing the whole win. Do not reorder the leading column.
+    //
+    // The column order after that is the arms' own reading order and carries no seek duty. `isrc`
+    // and `source_audio_key` are the two widest entries and are most of the index's 5 MB; they are
+    // here because the anchor-split and capture arms test their null-ness and a
+    // plain btree cannot store the test without the value. PLAIN ASC throughout (a `desc()` index
+    // would poison the drizzle snapshot into rebuilding every index on the next migration — the
+    // ratified trap), and a plain btree, never the vector `libsql_vector_idx` that wedges hosted
+    // Turso. NOT partial: the `certified` arm counts `is_catalogue = 0`, so both values are read.
+    //
+    // COVERAGE IS ALL-OR-NOTHING, so this list is a CONTRACT with `kindClause("anchor")` and
+    // `REC_ELIGIBLE_WHERE`: one column those fragments read that is missing here, and the planner
+    // abandons the index for the whole statement — same numbers, the full 9.5s cold scan back. The
+    // last two entries are exactly that lesson: `spotify_anchor_attempts` and `artists_json` are the
+    // anchor clause's unanchorable-credits filter (`coalesce(attempts,0) < N`,
+    // `lower(artists_json) not in (…)`), added because the clause grew them after the covering shape
+    // was first proven. `artists_json` looks alarming in an index and is not — it averages 16 bytes
+    // on prod (max 195, under 1 MB across the table), and `lower()` computes fine off the indexed
+    // value. The funnel integration test EXPLAINs the real statement and fails on any regression, so
+    // the contract is enforced rather than remembered.
+    index("tracks_funnel_scan_idx").on(
+      table.isCatalogue,
+      table.hasEmbedding,
+      table.spotifyUri,
+      table.sourceAudioKey,
+      table.analyzedFrom,
+      table.dismissedAt,
+      table.duplicateOfTrackId,
+      table.nearestFindingScore,
+      table.durationMs,
+      table.spotifyAnchorAttemptedAt,
+      table.isrc,
+      table.spotifyAnchorAttempts,
+      table.artistsJson,
+    ),
     // The `/fresh` window read ("what just came out"): `release_date BETWEEN <30d ago> AND
     // <today>` ordered `release_date DESC`. Over a table built to grow to five figures, an
     // unindexed range scan is exactly the full scan of a growing table AGENTS.md forbids, so

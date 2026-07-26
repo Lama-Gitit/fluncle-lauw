@@ -463,7 +463,7 @@ const ALLOWLIST: readonly AllowlistEntry[] = [
     file: "lib/server/funnel.ts",
     pattern: "anti-join:findings-is-null",
     reason:
-      "DELIBERATE, and never executed as written: these are the CANONICAL fragment spellings (five STAGE_SCAN_SELECT conditional aggregates + ANCHOR_BACKOFF_WHERE + the #893 retry-bench gauge), which `onMirrors()` rewrites onto the materialized columns (`t.is_catalogue`, `t.has_embedding`) at query construction — throwing if a respelling stops matching, with a fold-equivalence test pinning the pair. The findings join the fold still carries is PINNED by the `certified` arm of the same one-pass scan.",
+      "DELIBERATE, and never executed as written: the six are the CANONICAL fragment spellings — five STAGE_SCAN_SELECT conditional aggregates plus ANCHOR_BACKOFF_WHERE — which `onMirrors()` rewrites onto the materialized columns (`t.is_catalogue`, `t.has_embedding`) at query construction, throwing if a respelling stops matching, with a fold-equivalence test pinning the pair. The fold itself carries NO findings join any more: the `certified` arm reads `t.is_catalogue = 0`, which is what lets the whole pass ride `tracks_funnel_scan_idx` as a covering scan (backlog Wave 2 #7). `onMirrors()`'s own rewrite TABLE is exempt rather than uncounted — each rule keeps `<canonical> => <mirrored>` in one literal, so the `is_catalogue` in-region signal fires for the right reason. The spellings that DO execute are the three standalone REFERENCE queries kept for that equivalence test, which is why this ceiling covers fragments and not executed scans.",
   },
   {
     count: 1,

@@ -47,13 +47,15 @@
 export const EMBEDDING_DIMS = 1024;
 
 /**
- * THE VECTOR-CLEARING ASSIGNMENT — the one `SET` fragment for wiping a row's embedding, dropped
- * into any `update tracks set …` that quarantines or re-queues a row's audio (catalogue.ts uses
- * it at its three clear sites). Forward-fix 2026-07-26: the extraction shipped in `catalogue.ts`
- * (7a76b6ee) ahead of this definition; the in-flight `has_embedding` mirror work extends this
- * fragment to clear the mirror in the same assignment when that column's migration lands.
+ * THE VECTOR-CLEARING ASSIGNMENT — `embedding_blob` and its `has_embedding` mirror, as ONE
+ * `SET` fragment so the two provably cannot be written apart (schema.ts § `has_embedding`).
+ * Drop it into any `update tracks set …` that quarantines or re-queues a row's audio; the
+ * mirror is what lets `tracks_funnel_scan_idx` cover the funnel's stage scan, and a clear that
+ * forgot it would leave the funnel counting an embedding the ranking can no longer read.
+ * `embedding-mirror.test.ts` fails the build on an `embedding_blob =` write that skips this.
  */
-export const CLEAR_EMBEDDING_SQL = `embedding_blob = null`;
+export const CLEAR_EMBEDDING_SQL = `embedding_blob = null,
+              has_embedding = 0`;
 
 /**
  * Validate an already-parsed value as an embedding vector: a plain array of exactly

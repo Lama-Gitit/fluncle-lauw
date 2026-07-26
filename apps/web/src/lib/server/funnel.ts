@@ -25,13 +25,27 @@
 //     read back from the ledger (cut in SQL, plain ASC index walk on `day`).
 //
 // ── SCALE NOTE ────────────────────────────────────────────────────────────────────────
-// The stage scan + anchor split are single-pass conditional-aggregates over `tracks left join
-// findings` (never `union all` over a CTE — trap #4, docs/local-database.md). No vector or feature
-// blob crosses the wire — an `embedding_blob is not null` test reads the cell's null flag, not its
-// bytes. They ARE full scans of a growing table, computed live on every load: sub-second COUNT
-// scans this admin page (a single operator, low QPS) pays honestly rather than serving a snapshot
-// up to a day stale. Every other read here is either bounded (the queue counts ride their partial
-// indexes) or on the small `crawl_frontier` / `catalogue_snapshots` tables.
+// The stage scan + anchor split + re-ask bench are ONE single-pass conditional aggregate (never
+// `union all` over a CTE — trap #4, docs/local-database.md), and it is a full scan of a growing
+// table by construction: twelve `SUM(CASE)` arms over the whole catalogue, with no WHERE to seek on.
+// So the only lever is HOW MANY BYTES the scan touches, and the fold reads every arm out of the
+// covering `tracks_funnel_scan_idx` rather than out of table rows (see `runFoldedFunnelScan`).
+//
+// That distinction is the whole story, and it is worth stating plainly because the obvious reading
+// is wrong: it is NOT enough that no vector crosses the wire. `embedding_blob` is a ~4 KB
+// `F32_BLOB(1024)` that spills to overflow pages, and SQLite must WALK that chain to reach any
+// column stored after it — so arms reading `dismissed_at` / `nearest_finding_score` /
+// `spotify_anchor_attempted_at` / `isrc` used to drag every vector in the archive to count null
+// flags. Measured on hosted prod at 52k (2026-07-26): 9.5s cold, 0.38s warm, and a 15.08s span in
+// Sentry when the page cache had been evicted by a concurrent sweep; on a fresh 54,860-row prod
+// clone — the honest cold case — 12.6-19.9s. Covered, the same twelve arms read a 5 MB index instead
+// of a 125 MB table and land at 1.70s first-touch, 0.30s after. Live-on-every-load is affordable BECAUSE of that, not in
+// spite of it — this admin page (a single operator, low QPS) pays an index scan honestly rather
+// than serving a snapshot up to a day stale.
+//
+// Every other read here is either bounded (the queue counts ride their partial indexes), a stored
+// count (the public-surfaces card reads the maintained `renderable_track_count` — Wave 2 #2), or on
+// the small `crawl_frontier` / `catalogue_snapshots` tables.
 
 import { countIndexableAlbums } from "./albums";
 import { countIndexableArtists } from "./artists";
@@ -198,6 +212,65 @@ type FoldedFunnelScan = {
 };
 
 /**
+ * THE MIRROR REWRITE — take a shared `t`/`f`-aliased predicate and read it off the two MATERIALIZED
+ * mirrors instead: the catalogue discriminator (`f.track_id is null` ⇒ `t.is_catalogue = 1`,
+ * keystone 1) and the embedding-presence flag (`t.embedding_blob is not null` ⇒
+ * `t.has_embedding = 1`, Wave 2 #4). Both are equivalences the SCHEMA maintains on every write, so
+ * the rewritten predicate selects exactly the same rows — and it selects them without the `findings`
+ * join and without naming the blob, which is what lets the folded pass ride
+ * `tracks_funnel_scan_idx` as a COVERING scan (schema.ts § `tracks_funnel_scan_idx`).
+ *
+ * WHY REWRITE RATHER THAN FORK. This module's whole contract is that it counts THE PRODUCT'S OWN
+ * predicates — `kindClause("anchor")`, `REC_ELIGIBLE_WHERE` — never a copy that can drift from them.
+ * A hand-written mirror-form of each would be exactly that copy. So the one canonical text stays
+ * where it lives and this narrows it to the two atoms.
+ *
+ * THE GUARD MAKES DIVERGENCE UNSHIPPABLE. If a shared fragment is ever respelled — an
+ * `exists (select …)` anti-join in place of `f.track_id is null`, say — the substitutions stop
+ * matching, and rather than silently building a wrong or uncoverable query this THROWS at
+ * construction. The fold-equivalence test drives every fragment through here, so a respelling fails
+ * the suite rather than production.
+ */
+/**
+ * The rewrite table, each rule `<canonical> => <mirrored>` in ONE string literal. That is deliberate
+ * on two counts, so please do not "tidy" it into chained `.replaceAll(a, b)` calls:
+ *   - it keeps a rule's two halves in one place, where neither can be edited without the other;
+ *   - it keeps the db-query-shape guardrail HONEST. That scanner counts `f.track_id is null` as
+ *     catalogue-anti-join debt unless the enclosing literal also mentions `is_catalogue` — its
+ *     signal that the occurrence is a materialized-mirror conversion rather than a scan anyone
+ *     executes. Split across two arguments, this table reads as a seventh anti-join and inflates
+ *     funnel.ts's debt ceiling; written as one string per rule it is exempt for the right reason.
+ */
+const MIRROR_REWRITES = [
+  "f.track_id is not null => t.is_catalogue = 0",
+  "f.track_id is null => t.is_catalogue = 1",
+  "t.embedding_blob is not null => t.has_embedding = 1",
+  "t.embedding_blob is null => t.has_embedding = 0",
+] as const;
+
+function onMirrors(fragment: string): string {
+  let rewritten = fragment;
+
+  for (const rule of MIRROR_REWRITES) {
+    const [canonical, mirrored] = rule.split(" => ");
+
+    if (canonical === undefined || mirrored === undefined) {
+      throw new Error(`funnel: malformed mirror rewrite rule "${rule}"`);
+    }
+
+    rewritten = rewritten.replaceAll(canonical, mirrored);
+  }
+
+  if (rewritten.includes("f.") || rewritten.includes("embedding_blob")) {
+    throw new Error(
+      "funnel: a shared predicate no longer reduces to the stored `is_catalogue` / `has_embedding` mirrors, so the covering stage scan cannot be built from it",
+    );
+  }
+
+  return rewritten;
+}
+
+/**
  * The SEVEN stage `SUM(CASE)` columns — the shared select fragment so the standalone reference scan
  * (`runStageScan`) and the folded pass (`runFoldedFunnelScan`) can only ever agree. `rec_eligible`
  * folds in the SHARED `REC_ELIGIBLE_WHERE` (recommendations.ts): the funnel's eligibility count is,
@@ -310,34 +383,58 @@ export async function countAnchorQueueSplit(): Promise<AnchorSplit> {
 }
 
 /**
- * THE ONE PASS — the stage 7-col aggregate, the anchor-split 4-col, and the anchor-backoff count
- * folded into a SINGLE conditional-aggregate scan of `tracks left join findings` (docs/db-scale-backlog
- * Wave 1 #5). Each formerly-separate query's WHERE moves into its own `SUM(CASE WHEN …)` over the
+ * THE ONE PASS, as a statement — the stage 7-col aggregate, the anchor-split 4-col, and the
+ * anchor-backoff count folded into a SINGLE conditional-aggregate scan of `tracks`
+ * (docs/db-scale-backlog Wave 1 #5, covered by Wave 2 #7). Each formerly-separate query's
+ * WHERE moves into its own `SUM(CASE WHEN …)` over the
  * unfiltered superset — a conditional sum over the whole table equals `COUNT(*) … WHERE P` for any
  * predicate P, so the numbers are identical BY CONSTRUCTION, in one scan instead of three (the fold
  * lands on every `/admin/funnel` load AND the daily snapshot). The `?` order is: the four anchor
  * columns (each embeds `kindClause("anchor")`'s own binds — the window cutoff plus the unanchorable
  * credits — spread verbatim, so the count and the order follow the clause without a hand-kept list)
  * then the backoff cutoff.
- * `embedding_blob is not null` reads the cell's null flag, not its bytes — no vector crosses the wire.
- * Exported for the fold-equivalence test, which pins it to the three standalone reference queries.
+ *
+ * AND IT IS COVERED. The select list is assembled in the CANONICAL spelling — the very
+ * `f.track_id` / `embedding_blob` fragments the three reference queries below run — and then
+ * rewritten onto the stored mirrors in ONE pass ({@link onMirrors}), which drops the `findings` join
+ * and every mention of the vector. That is what turns this from a full table scan into
+ * `SCAN tracks USING COVERING INDEX tracks_funnel_scan_idx`: the arms read post-blob columns
+ * (`dismissed_at`, `nearest_finding_score`, `spotify_anchor_attempted_at`, `isrc`), and reaching
+ * those in a table row means walking each 4 KB vector's overflow chain — for a page whose numbers
+ * never left the null flags. Measured on a 54,860-row clone of production (hosted, 2026-07-26):
+ * 12.6-19.9s cold before, 1.70s first-touch and 0.30s after, off a 5 MB index rather than a 125 MB
+ * table, every count identical. Writing the canonical form and rewriting it — rather than
+ * hand-writing the mirror form — is what keeps this the SAME predicate as the sweeps, not a copy.
+ *
+ * Exported for the fold-equivalence test, which pins it to the three standalone reference queries —
+ * and so, since those still run the join-and-blob spelling, proves the two mirrors agree with the
+ * predicates they mirror.
  */
-export async function runFoldedFunnelScan(): Promise<FoldedFunnelScan> {
+export function foldedFunnelScanStatement(): { args: string[]; sql: string } {
   const anchor = kindClause("anchor");
-  const backoffCutoff = anchorBackoffCutoff();
-  const db = await getDb();
-  const result = await db.execute({
-    args: [...anchor.args, ...anchor.args, ...anchor.args, ...anchor.args, backoffCutoff],
-    sql: `select
-            ${STAGE_SCAN_SELECT},
+  const selectList = `${STAGE_SCAN_SELECT},
             sum(case when (${anchor.sql}) and t.isrc is not null and t.embedding_blob is not null then 1 else 0 end) as isrc_ready,
             sum(case when (${anchor.sql}) and t.isrc is not null and t.embedding_blob is null then 1 else 0 end) as isrc_awaiting,
             sum(case when (${anchor.sql}) and t.isrc is null and t.embedding_blob is not null then 1 else 0 end) as no_isrc_ready,
             sum(case when (${anchor.sql}) and t.isrc is null and t.embedding_blob is null then 1 else 0 end) as no_isrc_awaiting,
-            sum(case when (${ANCHOR_BACKOFF_WHERE}) then 1 else 0 end) as anchor_backoff
-          from tracks t
-          left join findings f on f.track_id = t.track_id`,
-  });
+            sum(case when (${ANCHOR_BACKOFF_WHERE}) then 1 else 0 end) as anchor_backoff`;
+
+  return {
+    args: [...anchor.args, ...anchor.args, ...anchor.args, ...anchor.args, anchorBackoffCutoff()],
+    sql: `select ${onMirrors(selectList)}
+          from tracks t`,
+  };
+}
+
+/**
+ * THE ONE PASS, executed. Split from {@link foldedFunnelScanStatement} so the coverage test can
+ * `EXPLAIN QUERY PLAN` the REAL statement rather than a hand-copied lookalike — the plan is the only
+ * thing that proves the arms still fit inside `tracks_funnel_scan_idx`, and a thirteenth arm reading
+ * a column the index does not carry would silently drop the scan back onto table rows.
+ */
+export async function runFoldedFunnelScan(): Promise<FoldedFunnelScan> {
+  const db = await getDb();
+  const result = await db.execute(foldedFunnelScanStatement());
   const row = typedRow<AnchorSplitRow & StageRow & { anchor_backoff: number | null }>(result.rows);
 
   return {

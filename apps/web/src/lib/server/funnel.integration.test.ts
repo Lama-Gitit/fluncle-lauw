@@ -8,6 +8,7 @@ import {
   seedAlbum,
   seedArtist,
   seedCatalogueTrack,
+  seedEmbedding,
   seedLabel,
   seedTrack,
   syncHubCounts,
@@ -45,12 +46,9 @@ function axis(index: number): number[] {
   return vector;
 }
 
-/** The write the embed pipeline performs: validated JSON → ranked F32_BLOB. */
+/** The write the embed pipeline performs: validated JSON → ranked F32_BLOB, plus its mirror. */
 async function embed(trackId: string, vector: number[]): Promise<void> {
-  await db.execute({
-    args: [JSON.stringify(vector), trackId],
-    sql: `update tracks set embedding_blob = vector32(?) where track_id = ?`,
-  });
+  await seedEmbedding(db, trackId, vector);
 }
 
 function publicUser(id: string, emailVerified = true): PublicUser {
@@ -554,5 +552,34 @@ describe("the folded funnel scan == its three standalone reference scans (real S
     expect(folded.anchorSplit.ready).toBeGreaterThan(0);
     expect(folded.anchorSplit.awaitingAudio).toBeGreaterThan(0);
     expect(folded.anchorBackoff).toBe(1);
+  });
+
+  // THE COVERAGE PIN (docs/db-scale-backlog Wave 2 #7). The equality above proves the folded
+  // pass is CORRECT; this proves it is still CHEAP, which is a separate property and the one that
+  // silently rots. The whole win is that every arm's column lives in `tracks_funnel_scan_idx`, so the
+  // scan reads the index and never fetches a table row — never walking a 4 KB vector's overflow pages
+  // to reach the post-blob columns the arms test. Add a thirteenth arm reading a column the index does
+  // not carry and the planner drops back to the table: same numbers, 9.5s cold instead of sub-second,
+  // and nothing else in the suite would notice.
+  //
+  // Asserted on the REAL statement (`foldedFunnelScanStatement`), not a copy, so the two cannot drift.
+  // This is a PLAN assertion, not a timing one — SQLite's planner choice, which the local engine
+  // shares with hosted Turso; the timings themselves were proven on hosted and belong in the docs
+  // (AGENTS.md: never trust the local database for a performance claim).
+  it("reads every arm out of the covering index, touching no table row and no findings join", async () => {
+    const { foldedFunnelScanStatement } = await import("./funnel");
+    const statement = foldedFunnelScanStatement();
+
+    // The rewrite must have removed both things that would force a table fetch.
+    expect(statement.sql).not.toContain("embedding_blob");
+    expect(statement.sql).not.toContain("findings");
+
+    const plan = await db.execute({
+      args: statement.args,
+      sql: `explain query plan ${statement.sql}`,
+    });
+    const detail = plan.rows.map((row) => JSON.stringify(row.detail)).join(" | ");
+
+    expect(detail).toContain("COVERING INDEX tracks_funnel_scan_idx");
   });
 });
