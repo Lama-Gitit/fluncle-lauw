@@ -459,7 +459,7 @@ const ALLOWLIST: readonly AllowlistEntry[] = [
       "The unlit half of a per-entity `/fresh` window. Entity-seeked plus a `release_date` range, so the anti-join is a residual on one entity's window (the growing-table risk here is backlog Wave-1 item 15, which was proven out and dropped).",
   },
   {
-    count: 7,
+    count: 6,
     file: "lib/server/funnel.ts",
     pattern: "anti-join:findings-is-null",
     reason:
