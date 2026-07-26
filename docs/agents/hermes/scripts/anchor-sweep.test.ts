@@ -16,6 +16,7 @@ import {
   groupCandidatesByTarget,
   itemToCandidate,
   parseLimitArg,
+  runAnchorSweep,
   runAnchorTick,
   SPOTIFY_SEARCH_MIN_INTERVAL_MS,
   spotifySearchPaceMs,
@@ -488,5 +489,72 @@ describe("spotifySearchPaceMs — the 60/min ceiling", () => {
     const searchesPerCall = 2;
     const callsPerMinute = 60_000 / SPOTIFY_SEARCH_MIN_INTERVAL_MS;
     expect(callsPerMinute * searchesPerCall).toBeLessThanOrEqual(60);
+  });
+});
+
+describe("runAnchorSweep (paging past the worklist cap)", () => {
+  function pagedDeps(pages: { anchorQuery: string; trackId: string }[][]): AnchorDeps {
+    let call = 0;
+
+    return {
+      fetchQueue: (limit) => {
+        const page = pages[Math.min(call, pages.length - 1)].slice(0, limit);
+        call += 1;
+
+        return Promise.resolve(page);
+      },
+      log: () => {},
+      now: () => 0,
+      report: () => Promise.resolve({ anchored: false, verifiedBy: null }),
+      resolveFree: () => Promise.resolve({ anchored: true, verifiedBy: "listenbrainz" }),
+      runActor: () => Promise.resolve([]),
+      sleep: () => Promise.resolve(),
+    };
+  }
+
+  function rows(prefix: string, n: number): { anchorQuery: string; trackId: string }[] {
+    return Array.from({ length: n }, (_, i) => ({
+      anchorQuery: `${prefix} q${i}`,
+      trackId: `${prefix}_${i}`,
+    }));
+  }
+
+  test("spends the batch across pages: 5 asked at page size 2 pulls 2+2+1", async () => {
+    const summary = await runAnchorSweep(
+      5,
+      pagedDeps([rows("a", 2), rows("b", 2), rows("c", 2), rows("d", 2)]),
+      2,
+    );
+
+    expect(summary.pages).toBe(3);
+    expect(summary.pulled).toBe(5);
+    expect(summary.anchoredByListenbrainz).toBe(5);
+    expect(summary.ok).toBe(true);
+  });
+
+  test("a short page means the queue ran dry — no further fetches", async () => {
+    const summary = await runAnchorSweep(10, pagedDeps([rows("a", 2), [], []]), 2);
+
+    expect(summary.pages).toBe(2);
+    expect(summary.pulled).toBe(2);
+  });
+
+  test("a failing page stops the sweep and carries the error", async () => {
+    const deps = pagedDeps([rows("a", 2)]);
+    let call = 0;
+    const flaky: AnchorDeps = {
+      ...deps,
+      fetchQueue: (limit) => {
+        call += 1;
+
+        return call === 1 ? deps.fetchQueue(limit) : Promise.reject(new Error("worker down"));
+      },
+    };
+    const summary = await runAnchorSweep(10, flaky, 2);
+
+    expect(summary.ok).toBe(false);
+    expect(summary.error).toBe("worker down");
+    expect(summary.pages).toBe(2);
+    expect(summary.pulled).toBe(2);
   });
 });

@@ -69,6 +69,11 @@ const APIFY_ACTOR = process.env.FLUNCLE_ANCHOR_ACTOR ?? "musicae~spotify-extende
 
 /** Rows per tick. Small on purpose — each is a billed Apify search (~$0.015). `--limit` overrides it. */
 const BATCH = Number(process.env.FLUNCLE_ANCHOR_BATCH ?? "15");
+// One worklist READ is capped server-side (the contract's `limit` max is 250 and the Worker clamps
+// harder to MAX_WORK_LIMIT = 200), so a BATCH above the cap MUST page: `runAnchorSweep` pulls
+// ≤PAGE_LIMIT rows per fetch until the batch is spent or the queue runs dry. Rows leave the window
+// via their attempt stamps, so consecutive pages never re-pull the same rows within a sweep.
+const PAGE_LIMIT = 200;
 
 /** Queries per Apify run-sync call — chunked so a big `--limit` burn never one-shots a giant run. */
 const APIFY_QUERY_CHUNK = Number(process.env.FLUNCLE_ANCHOR_APIFY_CHUNK ?? "15");
@@ -562,6 +567,71 @@ async function resolveAnchorFree(trackId: string): Promise<AnchorVerdict> {
   };
 }
 
+/**
+ * The PAGED sweep: `runAnchorTick` per ≤PAGE_LIMIT page until `total` rows have been pulled or the
+ * queue runs dry (a short page). One page failing stops the sweep (its summary carries the error) —
+ * a later page would just re-hit the same broken dependency. Summaries are summed field-wise.
+ */
+export async function runAnchorSweep(
+  total: number,
+  deps: AnchorDeps,
+  pageLimit: number = PAGE_LIMIT,
+): Promise<AnchorSummary & { pages: number; pulled: number }> {
+  const merged = {
+    anchoredByIsrc: 0,
+    anchoredByListenbrainz: 0,
+    anchoredBySearch: 0,
+    anchoredBySpotifyIsrc: 0,
+    anchoredBySpotifySearch: 0,
+    error: null as null | string,
+    isrcRecoveredByDeezer: 0,
+    missed: 0,
+    ok: true,
+    pages: 0,
+    pulled: 0,
+    skipped: 0,
+  };
+
+  let remaining = Math.max(0, Math.trunc(total));
+
+  while (remaining > 0) {
+    const ask = Math.min(pageLimit, remaining);
+    const page = await runAnchorTick(ask, deps);
+    const pulled =
+      page.anchoredByIsrc +
+      page.anchoredByListenbrainz +
+      page.anchoredBySearch +
+      page.anchoredBySpotifyIsrc +
+      page.anchoredBySpotifySearch +
+      page.missed +
+      page.skipped;
+
+    merged.pages += 1;
+    merged.pulled += pulled;
+    merged.anchoredByIsrc += page.anchoredByIsrc;
+    merged.anchoredByListenbrainz += page.anchoredByListenbrainz;
+    merged.anchoredBySearch += page.anchoredBySearch;
+    merged.anchoredBySpotifyIsrc += page.anchoredBySpotifyIsrc;
+    merged.anchoredBySpotifySearch += page.anchoredBySpotifySearch;
+    merged.missed += page.missed;
+    merged.skipped += page.skipped;
+
+    if (!page.ok) {
+      merged.ok = false;
+      merged.error = page.error;
+      break;
+    }
+
+    if (pulled < ask) {
+      break; // a short page = the queue ran dry; asking again buys nothing.
+    }
+
+    remaining -= pulled;
+  }
+
+  return merged;
+}
+
 // ── Main ──────────────────────────────────────────────────────────────────────
 
 /** Parse `--limit N` (an attended backlog burn); default is the hourly `FLUNCLE_ANCHOR_BATCH`. */
@@ -591,7 +661,7 @@ async function main(): Promise<void> {
     Number.isFinite(BATCH) && BATCH > 0 ? Math.trunc(BATCH) : 15,
   );
 
-  const summary = await runAnchorTick(limit, {
+  const summary = await runAnchorSweep(limit, {
     fetchQueue: fetchAnchorQueue,
     log,
     now: () => Date.now(),
