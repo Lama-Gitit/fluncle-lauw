@@ -63,7 +63,6 @@ import { Route as DocsSplatRouteImport } from './routes/docs.$'
 import { Route as DocsDotmdSplatRouteImport } from './routes/docs[.]md.$'
 import { Route as CliLatestDotshRouteImport } from './routes/cli/latest[.]sh'
 import { Route as ArtistSlugRouteImport } from './routes/artist.$slug'
-import { Route as ApiStatusRouteImport } from './routes/api/status'
 import { Route as ApiChatRouteImport } from './routes/api/chat'
 import { Route as AlbumSlugRouteImport } from './routes/album.$slug'
 import { Route as AdminUsersRouteImport } from './routes/admin/users'
@@ -405,11 +404,6 @@ const CliLatestDotshRoute = CliLatestDotshRouteImport.update({
 const ArtistSlugRoute = ArtistSlugRouteImport.update({
   id: '/artist/$slug',
   path: '/artist/$slug',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const ApiStatusRoute = ApiStatusRouteImport.update({
-  id: '/api/status',
-  path: '/api/status',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ApiChatRoute = ApiChatRouteImport.update({
@@ -848,7 +842,6 @@ export interface FileRoutesByFullPath {
   '/admin/users': typeof AdminUsersRoute
   '/album/$slug': typeof AlbumSlugRoute
   '/api/chat': typeof ApiChatRoute
-  '/api/status': typeof ApiStatusRoute
   '/artist/$slug': typeof ArtistSlugRouteWithChildren
   '/cli/latest.sh': typeof CliLatestDotshRoute
   '/docs.md/$': typeof DocsDotmdSplatRoute
@@ -974,7 +967,6 @@ export interface FileRoutesByTo {
   '/admin/users': typeof AdminUsersRoute
   '/album/$slug': typeof AlbumSlugRoute
   '/api/chat': typeof ApiChatRoute
-  '/api/status': typeof ApiStatusRoute
   '/artist/$slug': typeof ArtistSlugRouteWithChildren
   '/cli/latest.sh': typeof CliLatestDotshRoute
   '/docs.md/$': typeof DocsDotmdSplatRoute
@@ -1103,7 +1095,6 @@ export interface FileRoutesById {
   '/admin/users': typeof AdminUsersRoute
   '/album/$slug': typeof AlbumSlugRoute
   '/api/chat': typeof ApiChatRoute
-  '/api/status': typeof ApiStatusRoute
   '/artist/$slug': typeof ArtistSlugRouteWithChildren
   '/cli/latest.sh': typeof CliLatestDotshRoute
   '/docs.md/$': typeof DocsDotmdSplatRoute
@@ -1233,7 +1224,6 @@ export interface FileRouteTypes {
     | '/admin/users'
     | '/album/$slug'
     | '/api/chat'
-    | '/api/status'
     | '/artist/$slug'
     | '/cli/latest.sh'
     | '/docs.md/$'
@@ -1359,7 +1349,6 @@ export interface FileRouteTypes {
     | '/admin/users'
     | '/album/$slug'
     | '/api/chat'
-    | '/api/status'
     | '/artist/$slug'
     | '/cli/latest.sh'
     | '/docs.md/$'
@@ -1487,7 +1476,6 @@ export interface FileRouteTypes {
     | '/admin/users'
     | '/album/$slug'
     | '/api/chat'
-    | '/api/status'
     | '/artist/$slug'
     | '/cli/latest.sh'
     | '/docs.md/$'
@@ -1597,7 +1585,6 @@ export interface RootRouteChildren {
   TracksRoute: typeof TracksRoute
   AlbumSlugRoute: typeof AlbumSlugRoute
   ApiChatRoute: typeof ApiChatRoute
-  ApiStatusRoute: typeof ApiStatusRoute
   ArtistSlugRoute: typeof ArtistSlugRouteWithChildren
   CliLatestDotshRoute: typeof CliLatestDotshRoute
   DocsDotmdSplatRoute: typeof DocsDotmdSplatRoute
@@ -2045,13 +2032,6 @@ declare module '@tanstack/react-router' {
       path: '/artist/$slug'
       fullPath: '/artist/$slug'
       preLoaderRoute: typeof ArtistSlugRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/api/status': {
-      id: '/api/status'
-      path: '/api/status'
-      fullPath: '/api/status'
-      preLoaderRoute: typeof ApiStatusRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/api/chat': {
@@ -2678,7 +2658,6 @@ const rootRouteChildren: RootRouteChildren = {
   TracksRoute: TracksRoute,
   AlbumSlugRoute: AlbumSlugRoute,
   ApiChatRoute: ApiChatRoute,
-  ApiStatusRoute: ApiStatusRoute,
   ArtistSlugRoute: ArtistSlugRouteWithChildren,
   CliLatestDotshRoute: CliLatestDotshRoute,
   DocsDotmdSplatRoute: DocsDotmdSplatRoute,
