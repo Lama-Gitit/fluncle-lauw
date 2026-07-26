@@ -31,10 +31,61 @@ const migrationsFolder = fileURLToPath(new URL("../../../drizzle", import.meta.u
 export async function createIntegrationDb(): Promise<Client> {
   const client = createClient({ url: ":memory:" });
 
-  await migrate(drizzle(client), { migrationsFolder });
+  await client.batch(
+    (await schemaDdl()).map((sql) => ({ args: [], sql })),
+    "write",
+  );
   await ensureSearchIndex(client);
 
   return client;
+}
+
+/** The captured end-state DDL, built once per worker process and reused by every later call. */
+let capturedDdl: Promise<string[]> | undefined;
+
+/**
+ * THE SCHEMA, CAPTURED ONCE — replay the END STATE instead of the 131-migration chain.
+ *
+ * `migrate()` replays every generated migration in order, which for a schema this old means
+ * re-parsing 131 files and re-running the whole ALTER/CREATE history to arrive somewhere the
+ * final DDL describes directly. That is ~107 ms, and 64 of the 66 files using this harness call
+ * it from `beforeEach` — so it was paid PER TEST, 968 times: ~102 s of CPU (measured 2026-07-26)
+ * out of the suite's ~294 s, purely rebuilding the same schema. It also grew with every migration
+ * added, which is the wrong direction for a number multiplied by a thousand.
+ *
+ * So the chain runs ONCE per worker process, into a throwaway template, and what is kept is the
+ * `sqlite_master` DDL it produced. Replaying that into a fresh `:memory:` database costs ~4 ms —
+ * 26× cheaper — and lands the identical schema (261 objects either way, asserted by
+ * `integration-db.test.ts`). Ordering is `rowid`, which is creation order, so a table always
+ * precedes the indexes and triggers hanging off it.
+ *
+ * WHY THIS IS STILL "byte-identical to production". The DDL is not hand-written: it is what the
+ * generated migrations THEMSELVES produced a moment earlier in this process. If a migration is
+ * added, edited, or reordered, the template rebuilds from it on the next run and the captured DDL
+ * moves with it — there is nothing to keep in sync. `sqlite_%` objects are excluded because SQLite
+ * owns them (autoindexes come back with their table); the FTS5 index is not here either — it is a
+ * derived artifact that `ensureSearchIndex` still builds per database, exactly as before.
+ */
+function schemaDdl(): Promise<string[]> {
+  capturedDdl ??= (async () => {
+    const template = createClient({ url: ":memory:" });
+
+    await migrate(drizzle(template), { migrationsFolder });
+
+    const result = await template.execute(
+      `select sql from sqlite_master
+       where sql is not null and name not like 'sqlite_%'
+       order by rowid`,
+    );
+
+    template.close();
+
+    // `where sql is not null` above already excludes the null rows, so every value here is DDL
+    // text; the cast is the row-shape assertion libSQL's `unknown` cells always need.
+    return (result.rows as unknown as { sql: string }[]).map((row) => row.sql);
+  })();
+
+  return capturedDdl;
 }
 
 /**
