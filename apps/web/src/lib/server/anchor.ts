@@ -66,10 +66,31 @@ import {
   searchTrackCandidates,
   type TrackSearchResult,
 } from "./spotify";
-import { matchKey } from "./track-match";
+import { matchKey, normalizeArtists } from "./track-match";
 
-/** ±window on the row↔candidate duration match — one of the search rung's three verification signals. */
-export const ANCHOR_DURATION_TOLERANCE_MS = 2000;
+/**
+ * ±window on the row↔candidate duration match — one of the search rung's three verification
+ * signals. 3000, calibrated 2026-07-26 against 397 ISRC-matched same-recording pairs (our MB
+ * duration vs Deezer's independent master): same-recording drift P95 ≈ 1.0–1.5s and 3s cuts the
+ * false-miss rate by a third (2.0% → 1.3%), while every identity-passing candidate inside 5s in
+ * the collision sample was a benign re-press of the SAME recording — the nearest genuinely
+ * different recording sat ≥21s out (an empty 5–21s gap), so 3s admits nothing wrong. Widening
+ * past 3s stops paying (the residual misses are >15s cross-edit ISRC collisions no sane window
+ * recovers). The exact-ISRC rung is NOT gated by this (ISRC equality is the identity there;
+ * duration only tiebreaks) — this window guards the search triple and the Deezer ISRC-recovery
+ * rung. Raw data + method: the duration-gate calibration run (scripts kept with the session).
+ */
+export const ANCHOR_DURATION_TOLERANCE_MS = 3000;
+
+/**
+ * The TIGHT window the subset fallback demands (see `pickVerifiedCandidate`): a candidate that
+ * credits only a SUBSET of the row's artists may still verify, but only this close in duration —
+ * the loosened artist signal is paid for with a hardened duration signal. At ≤1s, 20 of 226
+ * stable misses in the 2026-07-26 dry-run were recoverable (platforms crediting only the primary
+ * artist on a collab — "LSB & DRS" listed as "LSB", Δ0.0s), with the same-recording drift P50 at
+ * 0.13s comfortably inside.
+ */
+export const ANCHOR_SUBSET_DURATION_TOLERANCE_MS = 1000;
 
 /** The free-text query the search rung asks of Spotify — the row's artists, then its title. */
 export function anchorSearchQuery(artists: string[], title: string): string {
@@ -107,9 +128,19 @@ type VerifiableCandidate = {
  * THE VERIFIED-SEARCH GATE. A candidate anchors ONLY when it clears ALL THREE signals: the same
  * artist SET, the same base title, and the same version descriptor as the row (all three carried
  * by the ratified `matchKey` fold — which deliberately keeps a remix/VIP descriptor distinct, so
- * the original of a logged VIP can never anchor to the VIP), AND a duration within ±2s of the
- * row's. Of the candidates that clear it, the closest duration wins; if none clear it, `undefined`
- * and the row stays in rotation. A candidate with no duration cannot be verified, so it is dropped.
+ * the original of a logged VIP can never anchor to the VIP), AND a duration within
+ * `ANCHOR_DURATION_TOLERANCE_MS` of the row's. Of the candidates that clear it, the closest
+ * duration wins; if none clear it, `undefined` and the row stays in rotation. A candidate with no
+ * duration cannot be verified, so it is dropped.
+ *
+ * THE SUBSET FALLBACK (measured 2026-07-26, ~9% of stable misses): platforms routinely credit
+ * only the PRIMARY artist on a collab ("LSB & DRS — Could Be" listed under "LSB" alone), which
+ * fails the artist-set equality forever. When no candidate clears the full gate, a candidate
+ * whose artist set is a non-empty PROPER SUBSET of the row's may verify instead — same base
+ * title, same descriptor, and the TIGHT `ANCHOR_SUBSET_DURATION_TOLERANCE_MS` window: the
+ * loosened artist signal is paid for with a hardened duration one. The subset direction is
+ * one-way on purpose — a candidate crediting artists the row does NOT name is a different credit
+ * (a feat. variant, another act's cover) and still never matches.
  */
 export function pickVerifiedCandidate<T extends VerifiableCandidate>(
   rowArtists: string[],
@@ -118,19 +149,53 @@ export function pickVerifiedCandidate<T extends VerifiableCandidate>(
   candidates: T[],
 ): T | undefined {
   const rowKey = matchKey(rowArtists, rowTitle);
+  const byClosestDuration = (left: T, right: T) =>
+    Math.abs((left.durationMs ?? 0) - rowDurationMs) -
+    Math.abs((right.durationMs ?? 0) - rowDurationMs);
 
-  return candidates
+  const full = candidates
     .filter(
       (candidate) =>
         typeof candidate.durationMs === "number" &&
         Math.abs(candidate.durationMs - rowDurationMs) <= ANCHOR_DURATION_TOLERANCE_MS &&
         matchKey(candidate.artists, candidate.title) === rowKey,
     )
-    .sort(
-      (left, right) =>
-        Math.abs((left.durationMs ?? 0) - rowDurationMs) -
-        Math.abs((right.durationMs ?? 0) - rowDurationMs),
-    )[0];
+    .sort(byClosestDuration)[0];
+
+  if (full) {
+    return full;
+  }
+
+  // The subset fallback. Compare base title + descriptor with the row's artist set SUBSTITUTED
+  // into the candidate's key, so the title fold stays the ratified one; the artist relation is
+  // checked explicitly as a proper, non-empty subset.
+  const rowNames = normalizeArtists(rowArtists);
+
+  return candidates
+    .filter((candidate) => {
+      if (
+        typeof candidate.durationMs !== "number" ||
+        Math.abs(candidate.durationMs - rowDurationMs) > ANCHOR_SUBSET_DURATION_TOLERANCE_MS
+      ) {
+        return false;
+      }
+
+      const candidateNames = normalizeArtists(candidate.artists);
+
+      if (candidateNames.size === 0 || candidateNames.size >= rowNames.size) {
+        return false;
+      }
+
+      for (const name of candidateNames) {
+        if (!rowNames.has(name)) {
+          return false;
+        }
+      }
+
+      // Titles must agree exactly as they would under the full gate — swap the row's artists in.
+      return matchKey(rowArtists, candidate.title) === rowKey;
+    })
+    .sort(byClosestDuration)[0];
 }
 
 /** The minimal shape the exact-ISRC rung reads off a candidate. */

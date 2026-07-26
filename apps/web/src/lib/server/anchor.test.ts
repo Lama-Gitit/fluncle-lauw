@@ -65,10 +65,21 @@ describe("pickVerifiedCandidate — the verified search triple", () => {
     );
   });
 
-  it("does NOT anchor when the duration is off by more than 2s", () => {
+  it("does NOT anchor when the duration is off by more than the 3s window", () => {
     const candidates = [{ ...base, artists: ["Hold Tight"], durationMs: 203_001, title: "Lounge" }];
 
     expect(pickVerifiedCandidate(["Hold Tight"], "Lounge", 200_000, candidates)).toBeUndefined();
+  });
+
+  it("anchors at 2.6s off — the calibrated window (same-recording drift P99 ≈ 5s, wrong-recording ≥21s)", () => {
+    // The measured 2026-07-26 false-miss: compilation master vs single master, Δ2.6s.
+    const candidates = [
+      { ...base, artists: ["Donnie Dubson"], durationMs: 320_000, title: "Monday" },
+    ];
+
+    expect(
+      pickVerifiedCandidate(["Donnie Dubson"], "Monday", 322_600, candidates)?.spotifyTrackId,
+    ).toBe("hit");
   });
 
   it("does NOT anchor a '- VIP' to a plain-title row (the fold keeps descriptors distinct)", () => {
@@ -79,12 +90,72 @@ describe("pickVerifiedCandidate — the verified search triple", () => {
     expect(pickVerifiedCandidate(["DJ Fresh"], "Bad Company", 200_000, candidates)).toBeUndefined();
   });
 
-  it("does NOT anchor when the artist set differs", () => {
+  it("does NOT anchor when the artist set differs (disjoint is never a subset)", () => {
     const candidates = [
       { ...base, artists: ["Someone Else"], durationMs: 200_000, title: "Dribble" },
     ];
 
     expect(pickVerifiedCandidate(["Muffler"], "Dribble", 200_000, candidates)).toBeUndefined();
+  });
+
+  it("SUBSET fallback: a primary-only credit anchors when the duration is within the tight 1s window", () => {
+    // The measured class (~9% of stable misses): "LSB & DRS — Could Be" listed under "LSB" alone.
+    const candidates = [{ ...base, artists: ["LSB"], durationMs: 340_400, title: "Could Be" }];
+
+    expect(
+      pickVerifiedCandidate(["LSB", "DRS"], "Could Be", 340_000, candidates)?.spotifyTrackId,
+    ).toBe("hit");
+  });
+
+  it("SUBSET fallback refuses outside the tight window, even inside the full gate's 3s", () => {
+    const candidates = [{ ...base, artists: ["LSB"], durationMs: 342_000, title: "Could Be" }];
+
+    expect(pickVerifiedCandidate(["LSB", "DRS"], "Could Be", 340_000, candidates)).toBeUndefined();
+  });
+
+  it("SUBSET fallback is one-way: a candidate crediting MORE artists than the row never matches", () => {
+    const candidates = [
+      { ...base, artists: ["LSB", "DRS"], durationMs: 340_000, title: "Could Be" },
+    ];
+
+    expect(pickVerifiedCandidate(["LSB"], "Could Be", 340_000, candidates)).toBeUndefined();
+  });
+
+  it("SUBSET fallback still enforces the version descriptor", () => {
+    const candidates = [
+      { ...base, artists: ["LSB"], durationMs: 340_000, title: "Could Be (Anile Remix)" },
+    ];
+
+    expect(pickVerifiedCandidate(["LSB", "DRS"], "Could Be", 340_000, candidates)).toBeUndefined();
+  });
+
+  it("SUBSET fallback drops a candidate with no artists at all", () => {
+    const candidates = [{ ...base, artists: [], durationMs: 340_000, title: "Could Be" }];
+
+    expect(pickVerifiedCandidate(["LSB", "DRS"], "Could Be", 340_000, candidates)).toBeUndefined();
+  });
+
+  it("the FULL gate wins over a closer-duration subset candidate", () => {
+    const candidates = [
+      {
+        ...base,
+        artists: ["LSB"],
+        durationMs: 340_000,
+        spotifyTrackId: "subset",
+        title: "Could Be",
+      },
+      {
+        ...base,
+        artists: ["LSB", "DRS"],
+        durationMs: 341_500,
+        spotifyTrackId: "full",
+        title: "Could Be",
+      },
+    ];
+
+    expect(
+      pickVerifiedCandidate(["LSB", "DRS"], "Could Be", 340_000, candidates)?.spotifyTrackId,
+    ).toBe("full");
   });
 
   it("drops a candidate with no duration (unverifiable), and picks the closest of those that clear", () => {
