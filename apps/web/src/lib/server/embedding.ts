@@ -47,6 +47,15 @@
 export const EMBEDDING_DIMS = 1024;
 
 /**
+ * THE VECTOR-CLEARING ASSIGNMENT — the one `SET` fragment for wiping a row's embedding, dropped
+ * into any `update tracks set …` that quarantines or re-queues a row's audio (catalogue.ts uses
+ * it at its three clear sites). Forward-fix 2026-07-26: the extraction shipped in `catalogue.ts`
+ * (7a76b6ee) ahead of this definition; the in-flight `has_embedding` mirror work extends this
+ * fragment to clear the mirror in the same assignment when that column's migration lands.
+ */
+export const CLEAR_EMBEDDING_SQL = `embedding_blob = null`;
+
+/**
  * Validate an already-parsed value as an embedding vector: a plain array of exactly
  * `EMBEDDING_DIMS` finite numbers. Returns the vector (copied into a dense
  * number array) or `null` when the shape is wrong — a defensive gate so a malformed
