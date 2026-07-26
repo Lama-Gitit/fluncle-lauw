@@ -40,9 +40,11 @@ Concise rules for working in Fluncle. Use MUST/SHOULD/NEVER to guide decisions.
 - MUST: Build the real implementation instead of papering over behavior when the implementation path is small and well-scoped.
 - MUST: Search the codebase before adding new patterns, helpers, dependencies, or abstractions.
 - MUST: Carry implementation work through verification: update focused tests/docs when behavior changes, run the relevant checks, and report any checks that could not be run.
+- MUST: Back every factual claim, number, and named blocker with evidence gathered THIS turn: the exact command or query and its output, or the specific code lines read. A figure from an earlier session, a rejected experiment, or a destroyed scratch environment is UNVERIFIED; label it so and never let it carry a recommendation. Read the actual code path before naming a blocker, and re-check `git` / reflog before accusing a process of a bad push.
 - MUST: Close obvious follow-through items discovered during the task when they are directly related and low-risk.
 - MUST: Never silently drop queued or delegated work: before ending a session, reconcile everything launched (sub-agents, renders, box crons, background jobs) and report anything still in flight.
 - SHOULD: Ask before expanding scope into unrelated refactors, production changes, paid infrastructure, destructive operations, or work that changes product direction.
+- SHOULD: When an adjacent risk or opportunity surfaces mid-task (a migration hazard, another consumer, a production concern), record it as a one-line follow-up note and stay on the asked task rather than silently widening the change. Answer from the repo before reaching for `AskUserQuestion`; reserve it for a decision the code genuinely cannot settle, not one you can read.
 - NEVER: Stop at a plan when the user asked for implementation and the implementation is feasible.
 - NEVER: Present a workaround as complete when a known real fix remains.
 
@@ -81,6 +83,7 @@ _(Price/intelligence are relative 1–10 guides, not measured costs.)_
 - MUST: Use `rg` for code search when available.
 - NEVER: Use `npm`, `pnpm`, or `yarn` for installs unless the task targets tooling that explicitly requires them.
 - NEVER: Run `prettier` or `bunx prettier` outside `apps/raycast`. Formatting is owned by `oxfmt` for the repo, except `apps/raycast` where Raycast's CLI is the source of truth and `ray lint` runs a Prettier check over `src/**`. Use `bunx oxfmt <files>` or `bun run check` for non-Raycast files; use `bun run --cwd apps/raycast lint -- --fix` only for Raycast formatting fixes.
+- MUST: Quote shell variables and iterate with explicit arrays; an unquoted expansion has silently no-op'd a destructive loop here before. In DB scripts use parameterized SQL (or proper escaping), and confirm a table actually has a column before querying it.
 
 ## Quality Checks
 
