@@ -43,6 +43,7 @@ Each of these is a repo half already shipped and a box/console half withheld. No
 - [ ] **Enable the three dark sweeps on rave-02.** The artist-bio + label-bio, logbook, and triage timers are baked in the repo (`artist-bio-timer`, `label-bio-timer`, `logbook-timer`, `triage-timer`) with box activation deliberately operator-gated; the repo halves are done, so this is one session for four units.
 - [ ] **Connect Twitch for /reach Tier-2.** The last unlit leg — the plumbing is live (optional env, Worker-side `twitch_auth` token, origin-derived redirect); what is missing is the operator granting **as the broadcaster** and registering the callback in the Twitch console. Runbook + verify command: [docs/reach-tier2-activation.md](../reach-tier2-activation.md).
 - [ ] **Redeploy the DNS binary to the dig host.** An operational activation carried out of the 2026-07-26 sweep — the hardened `apps/dns` build needs to reach the host that answers `dig`.
+- [ ] **Add `CF_CACHE_PURGE_TOKEN` to the Cloudflare build environment.** `deploy:cf` now ends with a post-deploy edge-cache purge (`apps/web/scripts/purge-edge-cache.ts`) so a deploy can never again strand cached HTML pointing at retired asset hashes (the 2026-07-26 unstyled-page window) — but the token is a Worker runtime secret the build shell cannot see, so until it is added to the build env the purge skips loudly and the old TTL window applies.
 
 ### The autonomy ladder — two manual beats left
 
