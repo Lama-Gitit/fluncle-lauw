@@ -319,7 +319,7 @@ const BOARD_SQL = `
     r.captured_day, r.views, r.likes, r.comments, r.shares,
     r.average_view_percentage, r.average_view_duration_seconds, r.watch_time_seconds,
     r.prev_views, r.prev_day, r.snapshot_count,
-    t.title, t.artists_json, t.video_structure, t.video_plate_subject,
+    t.title, t.artists_json, f.video_structure, f.video_plate_subject,
     f.log_id,
     sp.published_at, sp.url
   from ranked r
