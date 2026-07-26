@@ -31,7 +31,7 @@
     "fluncle-catalogue-prune": {
       "source": "packages/skills/fluncle-catalogue-prune",
       "sourceType": "local",
-      "computedHash": "ed56e4b5063232808f628f63df3147204f5b6dcbfb3ec0c98bfe4753ae08048b"
+      "computedHash": "6f5bbd7a41ced4ad9bda95f12898b2f6152f4635d92fbfc44c8839c06e829612"
     },
     "fluncle-embed-batch": {
       "source": "packages/skills/fluncle-embed-batch",
@@ -71,7 +71,7 @@
     "fluncle-rekordbox-sync": {
       "source": "packages/skills/fluncle-rekordbox-sync",
       "sourceType": "local",
-      "computedHash": "3c7c74bdad34f68a199ac571dd247d34f56ea13da6b78af239510e8e0394a263"
+      "computedHash": "da21f3f1f0ae7705c6aa20e5167c1d667299933d8387de8a38f8ffb53b4c71df"
     },
     "fluncle-rfc-writer": {
       "source": "packages/skills/fluncle-rfc-writer",
