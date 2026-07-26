@@ -116,7 +116,7 @@ describe("renderEditionEmailHtml — Frontier teaser (email-only chrome)", () =>
 
     expect(html).toContain("The frontier");
     expect(html).toContain(
-      "Point me at the tracks you love and I'll dig the far side of the archive for bangers that sit close to them.",
+      "Point me at the tracks you love and I'll dig through the archive for more.",
     );
     expect(html).toContain('href="https://www.fluncle.com/recommendations"');
     expect(html).toContain("Open the frontier");

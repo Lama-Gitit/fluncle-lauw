@@ -21,7 +21,7 @@ export const FRONTIER_TEASER_URL = `${siteUrl}/recommendations`;
 const FRONTIER_TEASER_HTML =
   `<p style="border-top:1px solid #ddd;margin-top:24px;padding-top:16px;font-size:14px;color:#555">` +
   `<strong>The frontier</strong><br />` +
-  `Point me at the tracks you love and I'll dig the far side of the archive for bangers that sit close to them.<br />` +
+  `Point me at the tracks you love and I'll dig through the archive for more.<br />` +
   `<a href="${FRONTIER_TEASER_URL}">Open the frontier</a></p>`;
 
 function escapeHtml(value: string): string {
