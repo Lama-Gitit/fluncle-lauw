@@ -43,6 +43,7 @@ These are reminders, not the spec; the spec is `references/voice.md`.
   - The Selector's Rule: Fluncle plays to see the hands go up. Start in his body (what it did to him), turn to the crew (what he hopes it does to you). Three beats — the hit, the pass, the address ("…hope it gets an oof out of you too. Enjoy, cosmonauts"). This is the shape of a finding note and a Telegram post.
   - The Sauce: the cosmos is a unit measuring how hard a tune hit or how far it threw you, never a free-floating subject. Strip Test: delete the space-words; a true, active, bodily sentence must remain. Keep it scientific (physics, the future, consciousness, simulation), never spiritual/hippie (ayahuasca, meditation, nirvana). The body keeps the transcendence honest.
 - Scene vocabulary is used confidently and never explained: tune, roller, rinse, rewind, dubplate, selector, 174, junglist.
+- The Name It Rule: call the thing by its noun — banger, track, tune, mixtape, playlist. "Ones", "things", "stuff", and bare "more" are banned unless the noun stands earlier in the SAME copy and the reference is unmistakable; even then, prefer the noun again. Repeating a true noun is voice, not a fault.
 - Log ID is a finding's permanent coordinate (`fluncle://241.7.3A`, bare `241.7.3A` in tight columns). It is the deferred identifier feature — name a finding's coordinate in copy only where the value actually exists; never invent one.
 
 ## Final checks
@@ -52,7 +53,8 @@ Before returning copy, verify against `references/voice.md`:
 - No banned identity words: "transmission(s)", "signal(s)", "anomaly", "curated / curation", "content", "stream / streaming" as identity, or marketing buzzwords. (📻 is retired with "transmission".) Fluncle finds and logs; he does not transmit, pick up signals, or curate.
 - Canon names are current: "Fluncle's Findings" (not "Fluncle's Finest"), "the Galaxy" (not "the ecosystem"), "the crew" for the community, "Found" for dates (not "Added" / "Discovered").
 - "Banger" appears at most once per paragraph; repeats became track or tune (the Banger Budget).
-- No exclamation marks. No em dashes in prose (the `Artist — Title` separator is the only sanctioned use).
+- Every pro-form points at a noun written earlier in the same copy (the Name It Rule): scan for "ones", "things", "stuff", bare "more" — if the antecedent is not in the string the reader sees, write the noun.
+- No exclamation marks. No em dashes in prose (the `Artist — Title` separator is the only sanctioned use). Mechanical sweep: grep the draft for `—` (U+2014); every hit must be an `Artist — Title` separator, rewrite the rest into commas, colons, or separate sentences. A slipped em dash has shipped before; this grep is the backstop, not a matter of eyeballing.
 - Sentence case for UI copy, headings, buttons, and labels; ALL CAPS only quotes the cover art or a sanctioned brand-mark plate (e.g. "RAVE TERMINAL" under the SSH figlet logo).
 - Emoji only on Telegram, only from the sanctioned set (🛸, 🎧).
 - Cosmos garnish modifies a working earth verb; it never replaces one, and it never appears inside compact controls (the Garnish Rule), with the long-form first-person carve-out.

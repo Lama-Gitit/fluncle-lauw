@@ -117,7 +117,7 @@ export function frontierDescription(user: PublicUser): string {
   const handle = user.username ?? user.displayUsername;
   const dugFor = handle ? `@${handle}` : "the crew";
 
-  return `Dug for ${dugFor} from the archive. Fresh ones every week. fluncle.com`;
+  return `Dug for ${dugFor} from the archive. Fresh bangers every week. fluncle.com`;
 }
 
 /** The stored row, one per user. */

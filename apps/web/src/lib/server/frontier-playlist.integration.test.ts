@@ -322,7 +322,7 @@ describe("mint (minting open) — create-once + the URI order", () => {
 
     const desc = frontierDescription(makeUser({ id: "u1", username: "alice" }));
 
-    expect(desc).toBe("Dug for @alice from the archive. Fresh ones every week. fluncle.com");
+    expect(desc).toBe("Dug for @alice from the archive. Fresh bangers every week. fluncle.com");
     expect(desc.length).toBeLessThanOrEqual(300);
     expect(desc).not.toContain("—");
     expect(frontierDescription(makeUser({ id: "u2" }))).toContain("Dug for the crew ");
