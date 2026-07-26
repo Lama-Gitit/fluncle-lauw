@@ -108,14 +108,8 @@ export async function loadCatalogue(): Promise<Catalogue> {
   };
 }
 
-/** Per-artist rollup used by the buckets + purge. `disabled` = tracks on operator-DISABLED labels. */
-export type ArtistAgg = {
-  hasFinding: boolean;
-  enabled: number;
-  disabled: number;
-  off: number;
-  total: number;
-};
+/** Per-artist rollup used by the buckets + purge. */
+export type ArtistAgg = { hasFinding: boolean; enabled: number; off: number; total: number };
 
 export function aggregateArtists(cat: Catalogue): Map<string, ArtistAgg> {
   const agg = new Map<string, ArtistAgg>();
@@ -126,7 +120,7 @@ export function aggregateArtists(cat: Catalogue): Map<string, ArtistAgg> {
     }
     let a = agg.get(e.artist_id);
     if (!a) {
-      agg.set(e.artist_id, (a = { disabled: 0, enabled: 0, hasFinding: false, off: 0, total: 0 }));
+      agg.set(e.artist_id, (a = { enabled: 0, hasFinding: false, off: 0, total: 0 }));
     }
     a.total++;
     if (cat.findingTrackIds.has(e.track_id)) {
@@ -136,26 +130,20 @@ export function aggregateArtists(cat: Catalogue): Map<string, ArtistAgg> {
       a.enabled++;
     } else {
       a.off++;
-      if (cat.trackDisabled(t)) {
-        a.disabled++;
-      }
     }
   }
   return agg;
 }
 
 /**
- * A SAFE-PURGE artist: no finding, no enabled-label track, AND at least one track on a label the
- * operator has EXPLICITLY DISABLED. That last clause is the safety: it means the operator has ruled
- * this artist's presence off-genre — so a metadata gap can't get an artist deleted. An artist whose
- * only tracks are on UNDECIDED or NO-label rows is NOT swept in (they surface for a label ruling
- * instead). An artist with even one enabled-label track is PROTECTED. Deleting a safe-purge artist
- * removes their page + the tracks credited ONLY to them; shared/collab tracks survive.
+ * A SAFE-PURGE artist: no finding AND no enabled-label track. Their entire Fluncle presence is
+ * off-boundary, so deleting them (and the tracks credited ONLY to them) removes off-genre pages
+ * without touching any DnB act. An artist with even one enabled-label track is PROTECTED.
  */
 export function safePurgeArtists(cat: Catalogue, agg = aggregateArtists(cat)): Set<string> {
   const out = new Set<string>();
   for (const [id, a] of agg) {
-    if (!a.hasFinding && a.enabled === 0 && a.disabled > 0) {
+    if (!a.hasFinding && a.enabled === 0) {
       out.add(id);
     }
   }

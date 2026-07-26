@@ -49,22 +49,6 @@ const A = [...safe],
 console.log(`\n===== PURGE (${CONFIRM ? "WRITE" : "DRY RUN"}) =====`);
 console.log(`artists ${A.length} · tracks ${T.length} · orphan albums ${AL.length}`);
 
-// EYEBALL: name every artist that would be deleted + the labels their tracks sit on. Safe-purge
-// artists can be behind ALREADY-disabled labels (invisible in the scan), so this is the only place
-// you see WHO gets purged before writing. Every one should be recognisably off-genre.
-const purgeLabels = new Map<string, Set<string>>();
-for (const e of cat.edges) {
-  if (!safe.has(e.artist_id)) {continue;}
-  const t = cat.trackById.get(e.track_id);
-  if (t?.label) {getOrSet(purgeLabels, e.artist_id, () => new Set<string>()).add(t.label);}
-}
-console.log(`\nartists that would be deleted (all should be off-genre):`);
-for (const id of A) {
-  const name = cat.artistById.get(id)?.name ?? "?";
-  const labels = [...(purgeLabels.get(id) ?? [])].slice(0, 4).join(", ") || "(no label)";
-  console.log(`  ${name}  ·  ${labels}`);
-}
-
 // ── entanglement guard ──────────────────────────────────────────────────────────
 const T_SET = deletable;
 const GUARD = [
