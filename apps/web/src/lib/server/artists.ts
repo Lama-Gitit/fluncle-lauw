@@ -1143,17 +1143,46 @@ export async function upsertTrackArtists(
  */
 export async function mintArtistByMbid(name: string, mbid: string): Promise<string> {
   const db = await getDb();
-  const newId = randomUUID();
-  const slug = await mintArtistSlug(newId, name);
-  const nowIso = new Date().toISOString();
 
-  await db.execute({
-    args: [newId, mbid, name, slug, nowIso, nowIso],
-    sql: `insert into artists (id, mbid, name, slug, created_at, updated_at)
-          values (?, ?, ?, ?, ?, ?)`,
-  });
+  // `mintArtistSlug` is check-THEN-insert, so a concurrent writer (the Worker's Spotify-keyed
+  // mint at publish/anchor, or an overlapping sweep tick) can claim the probed slug between the
+  // probe and this insert — the Sentry-observed `UNIQUE constraint failed: artists.slug`
+  // (FLUNCLE-WORKER-13). On that conflict, the ORDER of recovery is the identity law: if the race
+  // twin minted the SAME artist (this mbid), ADOPT its row — salting a fresh slug there would mint
+  // the split-identity duplicate the adopt rung exists to prevent. Only a genuinely different
+  // artist sharing the name-fold earns a re-probe (which now sees the winner and salts).
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const newId = randomUUID();
+    const slug = await mintArtistSlug(newId, name);
+    const nowIso = new Date().toISOString();
 
-  return newId;
+    try {
+      await db.execute({
+        args: [newId, mbid, name, slug, nowIso, nowIso],
+        sql: `insert into artists (id, mbid, name, slug, created_at, updated_at)
+              values (?, ?, ?, ?, ?, ?)`,
+      });
+
+      return newId;
+    } catch (error) {
+      if (!(error instanceof Error) || !error.message.includes("artists.slug")) {
+        throw error;
+      }
+
+      const existing = await db.execute({
+        args: [mbid],
+        sql: `select id from artists where mbid = ? limit 1`,
+      });
+      const existingId = typedRows<{ id: string }>(existing.rows)[0]?.id;
+
+      if (existingId) {
+        return existingId;
+      }
+    }
+  }
+
+  // Three probes lost three races on the same fold — something is systemically wrong; surface it.
+  throw new Error(`mintArtistByMbid: slug contention for "${name}" persisted across retries`);
 }
 
 /**
