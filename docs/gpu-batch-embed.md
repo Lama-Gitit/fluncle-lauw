@@ -84,13 +84,15 @@ This is the design, and everything else follows from it. **You do not rent 200 t
 - **`--minutes N`** (env `FLUNCLE_EMBED_RUN_MINUTES`, default **55**) is the run. It is the number to reach for.
 - **`--limit N`** is the **page** — how many tracks ride one `embed-track.py` call. It is not the run size, and it is capped at **100** (see the prefetch below). The default is the cap.
 
-**Pick `--minutes` by the block you rented, minus a margin.** Spilling one minute past an hour boundary buys a whole second hour for one track, so the run always stops **short** on purpose:
+**Pick `--minutes` by the block you rented, minus a margin.** Spilling one minute past an hour boundary buys a whole second hour for one track, so a hand-rented block always stops **short** on purpose:
 
 | you rented | pass                         |
 | ---------- | ---------------------------- |
 | 1 hour     | `--minutes 55` (the default) |
 | 2 hours    | `--minutes 115`              |
 | 4 hours    | `--minutes 235`              |
+
+That table is for a block someone rented by hand. When the pod is **API-driven** (the normal case now), the monitor destroys it the moment the queue drains, so the clock stops being the thing you trim to — pass `--minutes` as a generous **backstop** above the expected drain (`remaining ÷ tracksPerMinute`) and let the drain, not the hour, end the run.
 
 Four properties make the hour actually fill, and each is proven with a fake clock and a stubbed GPU in `embed-batch.test.ts`:
 
@@ -113,9 +115,13 @@ That is the load-bearing decision here. The decode → window → mean-pool → 
 
 **The boundary.** This is the _consumer_ side: given audio already in private R2, embed it. How the bytes got there is a separate concern with its own metered budget and is not this script's business.
 
-### The runbook (operator-fired)
+### The runbook
 
-The pod costs money by the minute, and **nothing in this repo can start one** — that is deliberate. The operator rents it, runs the batch, and destroys it.
+The pod costs money by the minute, but it is **not** an operator-only act: a `RUNPOD_API_KEY` sits in the vault beside the other secrets, so an agent provisions, runs, monitors and **destroys** the pod over the RunPod API, with no dashboard in the loop. (This doc said the opposite until 2026-07-26 — the claim predated the key.)
+
+**The procedure lives in the [`fluncle-embed-batch`](../packages/skills/fluncle-embed-batch) skill, Path B**, and that is the one to follow: it carries the API split (pods are REST, but GPU prices, real uptime and the SSH port are GraphQL-only, and there is no logs endpoint at all), the `dockerStartCmd` trap that leaves you with a billing pod you cannot see into, where the injected secrets actually land, and the detached monitor that holds the destroy so billing stops even if the session dies. What follows here is the shape of the job; the skill is the procedure.
+
+**Dependency pins are load-bearing.** `muq` leaves `transformers` and `numpy` unpinned, so an unconstrained install resolves versions the template's torch cannot carry — and neither failure is loud: transformers quietly disables its torch backend, numpy 2.x only warns at import and breaks the decode path later. Both leave a pod that is up, billing, and never embedding. `embed-batch.sh` pins them and runs a **preflight** that asserts torch, a live transformers torch backend, the numpy↔torch bridge, and the `muq` import before any GPU time is spent. Keep that preflight green rather than trusting the pins to age well.
 
 **Prerequisites.** A RunPod account, and the three secrets the pod needs (all already in the box's secrets item): the agent-scoped `FLUNCLE_API_TOKEN`, and the `fluncle-source-audio` R2 read credentials (`R2_ACCOUNT_ID`, `FLUNCLE_SOURCE_AUDIO_R2_ACCESS_KEY_ID`, `FLUNCLE_SOURCE_AUDIO_R2_SECRET_ACCESS_KEY`). The concrete vault paths live in the private companion repo.
 

@@ -83,6 +83,63 @@ echo "    template's build is the one matched to this pod's CUDA)"
 # Measured on an RTX A5000 pod, 2026-07-26.
 python3 -m pip install --quiet muq "transformers==4.40.2" "numpy<2"
 
+# The pins above are load-bearing and they WILL drift again (muq is unpinned upstream, and the
+# template image's torch moves independently). Prove the stack agrees BEFORE renting any more GPU
+# minutes: both failure modes are quiet — transformers raises deep in its own import, and a numpy
+# major mismatch is only a WARNING at import that kills the decode path later. A pod that fails
+# here has cost you a minute; a pod that discovers it after the batch starts has cost you an hour.
+echo "==> preflight: torch / transformers / numpy must agree"
+python3 - <<'PY'
+import sys
+
+def die(what, err):
+    sys.exit(
+        f"PREFLIGHT FAILED ({what}): {err}\n"
+        "  The muq install resolved a dependency this image's torch cannot carry.\n"
+        "  muq leaves `transformers` and `numpy` UNPINNED, so pip takes the current major of each:\n"
+        "    transformers 5.x needs torch >= 2.2  -> NameError: name 'torch' is not defined\n"
+        "    numpy 2.x vs a torch built on 1.x    -> Failed to initialize NumPy: _ARRAY_API not found\n"
+        "  Fix the pins in this script to match the image's torch, then re-run.\n"
+        "  Background: the fluncle-embed-batch skill, 'Pitfalls, collected'."
+    )
+
+try:
+    import torch
+except Exception as e:  # noqa: BLE001 - any import failure is fatal here
+    die("importing torch", e)
+try:
+    import transformers
+except Exception as e:  # noqa: BLE001
+    die("importing transformers", e)
+
+# A too-new transformers does NOT raise here — it quietly DISABLES its torch backend ("Disabling
+# PyTorch because PyTorch >= 2.4 is required but found 2.1.0") and imports fine, so checking the
+# import alone is a false green. The blow-up lands later, inside MuQ, as a bare NameError. Assert
+# the backend is actually live.
+if not transformers.utils.is_torch_available():
+    die(
+        "transformers has no torch backend",
+        f"transformers {transformers.__version__} disabled torch {torch.__version__} as too old",
+    )
+
+try:
+    import numpy
+    # The numpy<->torch bridge is what the decode path rides on, and it is what a numpy major
+    # mismatch actually breaks — importing both cleanly is NOT enough to prove it works.
+    torch.from_numpy(numpy.zeros(4, dtype="float32"))
+except Exception as e:  # noqa: BLE001
+    die("numpy<->torch bridge", e)
+
+# The real integration: this exact import is what died on the first run.
+try:
+    from muq import MuQ  # noqa: F401
+except Exception as e:  # noqa: BLE001
+    die("importing muq", e)
+
+print(f"  torch {torch.__version__} · transformers {transformers.__version__} · numpy {numpy.__version__}")
+print(f"  cuda available: {torch.cuda.is_available()}")
+PY
+
 echo "==> repo"
 if [ -d "${WORKDIR}/.git" ]; then
   git -C "${WORKDIR}" fetch --depth 1 origin main

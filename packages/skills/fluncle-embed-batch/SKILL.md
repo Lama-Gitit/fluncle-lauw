@@ -95,6 +95,16 @@ Paid, fast, for large backlogs. **An agent drives this end-to-end** — provisio
 
 Everything below was measured on a live run, 2026-07-26. The traps are the expensive part — a pod that is up and billing but silently doing nothing looks exactly like a pod that is working.
 
+**The short version, when the ask is just "drain the embed queue on RunPod".** Read `RUNPOD_API_KEY` + the four embed secrets from `op` (one biometric approval), size the queue, then:
+
+1. `POST https://rest.runpod.io/v1/pods` with the body below — no `dockerStartCmd`, `PUBLIC_KEY` set, the four secrets in `env`.
+2. Poll **GraphQL** for `runtime.ports` → the `privatePort: 22` entry; SSH in with `-o IdentitiesOnly=yes -o IdentityAgent=none`.
+3. On the pod: `curl -fsSL <raw embed-batch.sh> | bash -s -- --minutes 540`. It installs everything, runs the **preflight** (torch/transformers/numpy/muq must agree — it exits non-zero with the fix if they don't), warms the weights, and runs the batch.
+4. Start the **detached** queue-poll monitor that `DELETE`s the pod on drain, then walk away.
+5. When it drains: `fluncle admin catalogue rank --limit 250 --json` until `remaining` is 0.
+
+Expect ~21 tracks/min and roughly `queued ÷ 1,300` hours of GPU. Everything after this line is the why, and the traps if a step misbehaves.
+
 ### The API: two endpoints, split by job
 
 | Need                                | Where                                                                                |
