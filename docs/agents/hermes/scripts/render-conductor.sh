@@ -94,7 +94,20 @@ DONE_MARKER='${HOME:-/home/user}/conductor-run.done'
 API_URL="${FLUNCLE_API_URL:-https://www.fluncle.com}"
 
 log() { printf '[%s] %s\n' "$(date -u +%FT%TZ)" "$*" >>"$LOG_FILE" 2>/dev/null || true; }
-emit() { printf '%s\n' "$*"; } # the cron run summary lands on stdout
+# The cron run summary lands on stdout — as the human line PLUS the contracted JSON summary
+# line fluncle-healthcheck's findJsonSummary requires (#892 hardened no-summary to "died
+# mid-flight" on first sighting, which turned every text-only tick — queue empty included —
+# into a false Down on /status). emit() is the benign/steady-state exit; emit_fail() marks a
+# genuine failure (ok:false), which the healthcheck alarms on after two consecutive misses.
+json_escape() { printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'; }
+emit() {
+  printf '%s\n' "$*"
+  printf '{"ok":true,"summary":"%s"}\n' "$(json_escape "$*")"
+}
+emit_fail() {
+  printf '%s\n' "$*"
+  printf '{"ok":false,"summary":"%s"}\n' "$(json_escape "$*")"
+}
 now() { date +%s; }
 read_or() { cat "$1" 2>/dev/null || printf '%s' "$2"; }
 
@@ -249,7 +262,7 @@ trap 'rmdir "$LOCK_DIR" 2>/dev/null || true' EXIT
 # --- box CLI auth (idempotent; persisted under $HOME) ---
 if [ -z "${BOX_API_KEY:-}" ]; then
   log "BOX_API_KEY missing (place it in $CONDUCTOR_ENV)"
-  emit "render-conductor: no BOX_API_KEY — cannot reach the render box"
+  emit_fail "render-conductor: no BOX_API_KEY — cannot reach the render box"
   exit 1
 fi
 # The installer wrote the box config under ROOT's HOME at build; this cron runs as
@@ -265,7 +278,7 @@ fi
 # output so a real auth failure (bad key, network) is visible, not silent.
 if ! "$BOX_BIN" login "$BOX_API_KEY" >>"$LOG_FILE" 2>&1; then
   log "box login failed (see output above)"
-  emit "render-conductor: box.ascii auth failed"
+  emit_fail "render-conductor: box.ascii auth failed"
   exit 1
 fi
 
@@ -379,7 +392,7 @@ fi
 # Queue gate (cheap; avoids waking the box for nothing).
 if [ -z "${FLUNCLE_API_TOKEN:-}" ]; then
   log "FLUNCLE_API_TOKEN missing from the cron env"
-  emit "render-conductor: no agent token"
+  emit_fail "render-conductor: no agent token"
   exit 1
 fi
 # Read a WINDOW of the queue (oldest first), not just the head, so a poisoned head can be
@@ -448,7 +461,7 @@ if [ -z "$boxid" ]; then
   log "no usable box — reprovisioning"
   if ! boxid="$(BOX_BIN="$BOX_BIN" BUN_BIN="$BUN_BIN" FLUNCLE_BIN="$FLUNCLE_BIN" bash "$PROVISION" 2>>"$LOG_FILE")" || [ -z "$boxid" ]; then
     log "provision failed"
-    emit "render-conductor: provision failed"
+    emit_fail "render-conductor: provision failed"
     exit 1
   fi
   printf '%s' "$boxid" >"$BOXID_FILE"
@@ -511,7 +524,7 @@ trigger_out="$("$BOX_BIN" ssh "$boxid" 'bash ~/render-detached.sh' 2>&1)"
 printf '%s\n' "$trigger_out" >>"$LOG_FILE"
 if ! printf '%s' "$trigger_out" | grep -q 'render-detached: launched'; then
   log "render trigger did not launch on $boxid (wedged box) — deleting it + staying idle to reprovision"
-  emit "render-conductor: render trigger failed on $boxid — box condemned, reprovision next tick"
+  emit_fail "render-conductor: render trigger failed on $boxid — box condemned, reprovision next tick"
   "$BOX_BIN" stop "$boxid" >/dev/null 2>&1 || true
   "$BOX_BIN" delete "$boxid" >/dev/null 2>&1 || true
   : >"$BOXID_FILE"

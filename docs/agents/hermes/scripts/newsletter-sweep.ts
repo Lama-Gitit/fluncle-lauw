@@ -757,6 +757,9 @@ async function main(): Promise<void> {
     const offer = offerLine(existing.subject ?? "(untitled)", existing.id, finds, mixes);
     console.log(offer);
     deliverOffer(offer);
+    // The contracted JSON summary (fluncle-healthcheck findJsonSummary, hardened by #892):
+    // without a trailing object line, a healthy re-offer reads as "died mid-flight" on /status.
+    console.log(JSON.stringify({ edition: existing.id, ok: true, reason: "reoffered" }));
 
     return;
   }
@@ -813,6 +816,7 @@ async function main(): Promise<void> {
     console.log(
       `[dry-run] would draft _${authored.subject}_ — ${finds} tracks + ${mixes} mixtapes`,
     );
+    console.log(JSON.stringify({ dryRun: true, finds, mixes, ok: true }));
 
     return;
   }
@@ -861,6 +865,11 @@ async function main(): Promise<void> {
     vendor: "anthropic",
   };
   await emitCost([cost]);
+
+  // The contracted JSON summary — LAST stdout line on purpose (findJsonSummary scans
+  // backwards). The failure paths already emit theirs; without this, the one path that
+  // WORKED (a drafted edition) was the one reading as "died mid-flight" on /status.
+  console.log(JSON.stringify({ edition: id, finds, mixes, ok: true }));
 }
 
 // `import.meta.main` so the pure helper (the fallback authoring prompt) can be imported
