@@ -15,9 +15,14 @@ Type=oneshot
 # from main via pin-watch); this host unit only TRIGGERS it, and the sweep self-writes its
 # /status marker (cron-output.sh). NO new secret: `crawl_catalogue` is AGENT tier, so the
 # box's existing agent-scoped token drives it.
-ExecStart=/usr/bin/docker exec -u hermes -e HOME=/opt/data/home hermes bash /opt/hermes-scripts/crawl-sweep.sh
-# A PURE trigger — zero LLM tokens. One pass is ~10 MusicBrainz calls paced at ~1 req/s in
-# the Worker (≈12–38s normal), plus headroom for a Retry-After'd 503. The old 120s ceiling
+# FLUNCLE_CRAWL_NODES is the per-pass frontier budget (the sweep's `--limit`, default 10). It must
+# ride the `docker exec` as `-e`: a systemd `Environment=` would set it on this host wrapper and
+# never reach the sweep inside the container. Raised 10 → 30 on 2026-07-26 — a 10-node pass measured
+# 26–35s inside a 600s window (~5% duty cycle), so the crawler was idle ~95% of the time while the
+# frontier grew past 90k pending. See the README for how to size it.
+ExecStart=/usr/bin/docker exec -u hermes -e HOME=/opt/data/home -e FLUNCLE_CRAWL_NODES=30 hermes bash /opt/hermes-scripts/crawl-sweep.sh
+# A PURE trigger — zero LLM tokens. One pass is ~3 MusicBrainz calls per node paced at ~1 req/s in
+# the Worker (measured ~3s/node, so ≈90s at 30 nodes), plus headroom for a Retry-After'd 503. The old 120s ceiling
 # false-killed a tick that merely overlapped a pin-watch docker image build (~4 min of heavy
 # CPU contention on this 4-vCPU box); 600s clears that window with room to spare. It equals
 # the 10-min cadence: systemd never starts a new tick while one is active, so an over-long
