@@ -83,9 +83,9 @@ bun run packages/skills/fluncle-catalogue-prune/scripts/purge.ts            # dr
 bun run packages/skills/fluncle-catalogue-prune/scripts/purge.ts --confirm  # writes rollback then deletes
 ```
 
-The purge is **artist-driven**: it deletes only safe-purge artists (no finding, no enabled-label track), the tracks credited _only_ to them, orphan albums, and the cascade (edges, socials, aliases, centroids/similar, cost_events). It writes a full per-row rollback first. The **entanglement guard** aborts if any deletable track is in a mixtape, a user save, a published post, or a frontier edition — that's a surprise for a human, never a silent delete.
+The purge is **artist-driven**: it deletes only safe-purge artists (no finding, no enabled-label track, AND ≥1 track on a label you've explicitly **disabled** — so an artist with only undecided/no-label tracks is never swept in on a metadata gap), the tracks credited _only_ to them, orphan albums, and the cascade (edges, socials, aliases, centroids/similar, cost_events). It writes a full per-row rollback first. The **entanglement guard** aborts if any deletable track is in a mixtape, a user save, a published post, or a frontier edition — that's a surprise for a human, never a silent delete.
 
-**Read the dry-run's artist/track/album counts and sample before confirming.** If a count is far larger than expected, a label ruling was wrong — go back to step 2.
+**The dry-run NAMES every artist it would delete, with their labels — eyeball that list; every one should be recognisably off-genre.** If a count is far larger than expected, a label ruling was wrong — go back to step 2.
 
 ### 5 — Verify
 
