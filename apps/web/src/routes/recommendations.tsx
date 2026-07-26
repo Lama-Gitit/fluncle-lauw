@@ -174,8 +174,7 @@ export const Route = createFileRoute("/recommendations")({
     meta: [
       { title: "Recommendations" },
       {
-        content:
-          "Point Fluncle at the tracks you love and he digs the far side of the archive for more.",
+        content: "Point Fluncle at the tracks you love and he digs the archive for more.",
         name: "description",
       },
       // Unlisted while the door is gated (ROADMAP § the recommendation machine): it exists for
@@ -187,8 +186,8 @@ export const Route = createFileRoute("/recommendations")({
 });
 
 const MASTHEAD: Record<RecsGate["state"], string> = {
-  anonymous: "The crate Fluncle digs from the far side of the archive, pointed at your taste.",
-  unverified: "The crate Fluncle digs from the far side of the archive, pointed at your taste.",
+  anonymous: "The crate Fluncle digs from the archive, pointed at your taste.",
+  unverified: "The crate Fluncle digs from the archive, pointed at your taste.",
   // The verified door shows no tagline — the playlist header carries the meaning.
   verified: "",
 };
@@ -255,8 +254,8 @@ function RecommendationsPage() {
                 Join the crew
               </Button>
             }
-            body="Join the crew to point him at your taste, and he lines up bangers that sit close to it."
-            lede="Fluncle digs the far side of the archive for you."
+            body="Join the crew to point him at your taste, and he lines up bangers to match."
+            lede="Fluncle digs the archive for you."
           />
         )}
       </article>
