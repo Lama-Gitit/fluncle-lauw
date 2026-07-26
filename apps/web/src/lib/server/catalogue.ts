@@ -50,6 +50,7 @@
 import { type InStatement } from "@libsql/client/web";
 import { parseArtistsJson } from "./artists";
 import { getDb, typedRow, typedRows } from "./db";
+import { CLEAR_EMBEDDING_SQL } from "./embedding";
 import { labelSlug } from "./labels";
 import { getSetting, setSetting } from "./settings";
 import { matchKey } from "./track-match";
@@ -1410,7 +1411,7 @@ export async function rankCatalogue(
           ],
           sql: `update tracks
               set capture_status = ?,
-                  embedding_blob = null,
+                  ${CLEAR_EMBEDDING_SQL},
                   nearest_finding_score = null,
                   nearest_finding_track_id = ?,
                   capture_priority = ?,
@@ -2385,8 +2386,7 @@ export async function listCatalogueTracks(
           // mix's centroid-like vector would otherwise sit at the very top of the telescope.
           sql: `select ${CATALOGUE_SELECT}
                 from tracks ct
-                left join findings cf on cf.track_id = ct.track_id
-                where cf.track_id is null
+                where ct.is_catalogue = 1
                   and ct.dismissed_at is null
                   and ct.nearest_finding_score is not null
                   and ct.duplicate_of_track_id is null
@@ -2401,8 +2401,7 @@ export async function listCatalogueTracks(
             args: [WRONG_AUDIO_STATUS, page],
             sql: `select ${CATALOGUE_SELECT}
                   from tracks ct
-                  left join findings cf on cf.track_id = ct.track_id
-                  where cf.track_id is null and ct.dismissed_at is null and ct.capture_status = ?
+                  where ct.is_catalogue = 1 and ct.dismissed_at is null and ct.capture_status = ?
                   order by ct.catalogue_ranked_at desc, ct.track_id asc
                   limit ?`,
           }
@@ -2416,8 +2415,7 @@ export async function listCatalogueTracks(
               args: [lens, page],
               sql: `select ${CATALOGUE_SELECT}
                     from tracks ct
-                    left join findings cf on cf.track_id = ct.track_id
-                    where cf.track_id is null and ct.dismissed_at is null and ct.capture_status = ?
+                    where ct.is_catalogue = 1 and ct.dismissed_at is null and ct.capture_status = ?
                     order by ct.source_audio_attempted_at desc, ct.track_id asc
                     limit ?`,
             }
@@ -2429,8 +2427,7 @@ export async function listCatalogueTracks(
                 args: [page],
                 sql: `select ${CATALOGUE_SELECT}
                     from tracks ct
-                    left join findings cf on cf.track_id = ct.track_id
-                    where cf.track_id is null and ct.dismissed_at is not null
+                    where ct.is_catalogue = 1 and ct.dismissed_at is not null
                     order by ct.dismissed_at desc, ct.track_id asc
                     limit ?`,
               }
@@ -2449,8 +2446,7 @@ export async function listCatalogueTracks(
                 args: [WRONG_AUDIO_STATUS, page],
                 sql: `select ${CATALOGUE_SELECT}
                     from tracks ct
-                    left join findings cf on cf.track_id = ct.track_id
-                    where cf.track_id is null
+                    where ct.is_catalogue = 1
                       and ct.dismissed_at is null
                       and ct.nearest_finding_score is null
                       and ct.capture_priority is not null
@@ -2856,7 +2852,7 @@ export async function flagWrongAudio(trackId: string): Promise<boolean> {
     args: [WRONG_AUDIO_STATUS, rejected, trackId],
     sql: `update tracks
           set capture_status = ?,
-              embedding_blob = null,
+              ${CLEAR_EMBEDDING_SQL},
               analyzed_from = null,
               capture_verification = null,
               source_audio_rejected = ?
@@ -3100,7 +3096,7 @@ export async function verifyCapture(
     args: [WRONG_AUDIO_STATUS, preAudio.priority, preAudio.duplicateOf, rejected, now, trackId],
     sql: `update tracks
           set capture_status = ?,
-              embedding_blob = null,
+              ${CLEAR_EMBEDDING_SQL},
               nearest_finding_score = null,
               capture_priority = ?,
               duplicate_of_track_id = ?,

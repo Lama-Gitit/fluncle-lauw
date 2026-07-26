@@ -445,11 +445,11 @@ const ALLOWLIST: readonly AllowlistEntry[] = [
       "The `/artist` + `/label` catalogue group walks. Entity-SEEKED first (`ta.artist_id = ?` / `tracks.label_id = ?` over their indexes), so the anti-join is a residual on one entity's rows.",
   },
   {
-    count: 7,
+    count: 2,
     file: "lib/server/catalogue.ts",
     pattern: "anti-join:findings-is-null",
     reason:
-      "Two shapes: readRowBuckets + readRowBucketsBatch (2) are PK point reads where the anti-join is the CORRECTNESS guard — it returns nothing for a certified row, so a stray id contributes no summary delta; the five `/admin/catalogue` lenses (ear/quarantine/unmatched-failed/dismissed/capture-queue) are backlog item 14, DEFERRED (the capture_status composite was proven not to be selected). Flagged as Keystone-1 conversion candidates in the PR — CATALOGUE_SELECT reads only `ct.`, so the `cf` join exists purely for this predicate.",
+      "readRowBuckets + readRowBucketsBatch: PK point reads where the anti-join is the CORRECTNESS guard — it returns nothing for a certified row, so a stray id contributes no summary delta. (The five `/admin/catalogue` lenses this entry once carried were converted onto `is_catalogue = 1` the day the guardrail landed — the list's first shrink.)",
   },
   {
     count: 1,
@@ -459,11 +459,11 @@ const ALLOWLIST: readonly AllowlistEntry[] = [
       "The unlit half of a per-entity `/fresh` window. Entity-seeked plus a `release_date` range, so the anti-join is a residual on one entity's window (the growing-table risk here is backlog Wave-1 item 15, which was proven out and dropped).",
   },
   {
-    count: 6,
+    count: 7,
     file: "lib/server/funnel.ts",
     pattern: "anti-join:findings-is-null",
     reason:
-      "DELIBERATE (backlog Wave-2 Keystone 1, explicit): the five STAGE_SCAN_SELECT conditional aggregates + ANCHOR_BACKOFF_WHERE. The findings join is PINNED by the `certified` arm of the same one-pass scan, so materializing the null-check buys nothing — the join has to happen either way.",
+      "DELIBERATE, and never executed as written: these are the CANONICAL fragment spellings (five STAGE_SCAN_SELECT conditional aggregates + ANCHOR_BACKOFF_WHERE + the #893 retry-bench gauge), which `onMirrors()` rewrites onto the materialized columns (`t.is_catalogue`, `t.has_embedding`) at query construction — throwing if a respelling stops matching, with a fold-equivalence test pinning the pair. The findings join the fold still carries is PINNED by the `certified` arm of the same one-pass scan.",
   },
   {
     count: 1,
