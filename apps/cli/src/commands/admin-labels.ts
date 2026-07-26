@@ -1,5 +1,9 @@
-import { type MergeLabelResult } from "@fluncle/contracts";
-import { adminApiGet, adminApiPost } from "../api";
+import {
+  type LabelAdminItem,
+  type LabelSeedState,
+  type MergeLabelResult,
+} from "@fluncle/contracts";
+import { adminApiGet, adminApiPatch, adminApiPost } from "../api";
 import {
   buildBioBody,
   type EntityBioDraft,
@@ -25,6 +29,36 @@ export async function mergeLabelCommand(
   );
 
   return response.result;
+}
+
+// ── The crawl-seed ruling: enable/disable a label as a crawl seed ─────────────
+// Thin HTTP client over the operator-tier `update_label` op (PATCH /admin/labels/{id}).
+// The ruling steers what Fluncle crawls NEXT — an `enabled` label's releases are stored,
+// a `disabled`/`undecided` label's are walked for discovery but written as nothing (the
+// storage gate). It touches NOTHING already stored. See docs/label-entity.md.
+
+// The server op is keyed by the raw `lbl_…` id, but the operator thinks in slugs — so
+// resolve through the seed-set read first. An exact id is also accepted, so the box's
+// worklists can pass ids straight through.
+export async function updateLabelCommand(
+  slugOrId: string,
+  seedState: LabelSeedState,
+): Promise<LabelAdminItem> {
+  const { labels } = await adminApiGet<{ labels: LabelAdminItem[]; ok: boolean }>(
+    "/api/v1/admin/labels",
+  );
+  const match = labels.find((label) => label.slug === slugOrId || label.id === slugOrId);
+
+  if (!match) {
+    throw new Error(`No label with slug or id '${slugOrId}' — check \`fluncle labels\``);
+  }
+
+  const response = await adminApiPatch<{ label: LabelAdminItem; ok: boolean }>(
+    `/api/v1/admin/labels/${encodeURIComponent(match.id)}`,
+    { seedState },
+  );
+
+  return response.label;
 }
 
 // ── The voiced bio: the entity-bio engine (thin HTTP client) ──────────────────

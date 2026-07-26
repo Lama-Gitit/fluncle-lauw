@@ -2792,7 +2792,9 @@ function addAdminCommands(program: Command): void {
   // `describe_label` + the crawl-seed reads → `admin labels` group (Convention B). The
   // voiced-bio author is the label sibling of `admin artists describe`.
   const labels = configureCommand(
-    admin.command("labels").description("Label entity commands (voiced bio + slug-split merge)"),
+    admin
+      .command("labels")
+      .description("Label entity commands (crawl-seed ruling + voiced bio + slug-split merge)"),
   );
 
   labels.action(() => {
@@ -2844,6 +2846,38 @@ function addAdminCommands(program: Command): void {
     .action(async (slug: string, options: { json: boolean }) => {
       const { draftLabelBioCommand } = await import("./commands/admin-labels");
       await runEntityBioDraft("label", slug, options, draftLabelBioCommand);
+    });
+
+  // `update_label` → `admin labels update <slug> --seed-state <state>` (operator). The crawl-seed
+  // ruling: `enabled` opens STORAGE for the label's releases, `disabled`/`undecided` keeps them
+  // walked-but-unwritten (the storage gate). Steers the NEXT crawl only; touches nothing stored.
+  labels
+    .command("update")
+    .description("Rule on a label's crawl-seed state (operator; next crawl only, never storage)")
+    .argument("<slug>", "The label's slug (an exact lbl_… id also works)")
+    .option("--seed-state <state>", "The ruling: enabled, disabled, or undecided")
+    .option("--json", "Print JSON", false)
+    .action(async (slug: string, options: { json: boolean; seedState?: string }) => {
+      const seedState = options.seedState;
+
+      if (seedState !== "enabled" && seedState !== "disabled" && seedState !== "undecided") {
+        throw new Error("Pass --seed-state enabled|disabled|undecided");
+      }
+
+      const { updateLabelCommand } = await import("./commands/admin-labels");
+      const label = await updateLabelCommand(slug, seedState);
+
+      if (options.json) {
+        printJson({ label, ok: true });
+        return;
+      }
+
+      console.log(`${label.name} (${label.slug}) → ${label.seedState}.`);
+      console.log(
+        label.seedState === "enabled"
+          ? "  The next crawl seeds from it and stores its releases."
+          : "  The next crawl will not seed from it; nothing already stored is touched.",
+      );
     });
 
   // `merge_label` → `admin labels merge <losingSlug> <canonicalSlug>` (operator). Fold a slug-split
@@ -7224,6 +7258,7 @@ const stringOptions = new Set([
   "--script",
   "--script-file",
   "--seed",
+  "--seed-state",
   "--soundcloud-url",
   "--source",
   "--status",
