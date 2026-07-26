@@ -46,7 +46,7 @@
     "fluncle-hermes-operator": {
       "source": "packages/skills/fluncle-hermes-operator",
       "sourceType": "local",
-      "computedHash": "9dda86a2d0026d8bbabe44090690956b8645e73f61de82ad57021889159fad37"
+      "computedHash": "f07f89eb66f308bf1a506003827db17645416474e79504b06083c171bef62d50"
     },
     "fluncle-maintenance": {
       "source": "packages/skills/fluncle-maintenance",

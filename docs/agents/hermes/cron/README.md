@@ -30,7 +30,7 @@ Every automation cron has its own timer dir under `docs/agents/hermes/<job>-time
 
 ### The reset boundary (what survives a re-provision)
 
-Three layers are repo-derived and come back on a bare re-provision. A fourth is **not backed up at all** — read that one before assuming anything survives the box.
+Three layers are repo-derived and come back on a bare re-provision. A fourth — the accumulated box state — is captured by leg 2 of the nightly backup, but only what its include list covers and only while its key exists; read that one before assuming anything survives the box.
 
 - **Code** — baked into the image (Unit A). Restored by the rebuild from `main`.
 - **Schedule** — the host-timer units. Restored by running `../install-host-timers.sh` from the repo checkout.
@@ -39,7 +39,7 @@ Three layers are repo-derived and come back on a bare re-provision. A fourth is 
 
 Known caveats in the installer + self-deploy path are being closed separately; the three restorable layers are restorable precisely because they are derived from this repo rather than accumulated on the box.
 
-**The daily backup does not cover box state — it covers the production database.** [`fluncle-backup`](#the-database-backup-cron-live) dumps the **prod Turso database** and only that: read over the libSQL HTTP pipeline, gzipped, PUT to the private `fluncle-backups` R2 bucket (off Cloudflare, its own 30-daily / 12-monthly retention, restore-drilled by `bun run --cwd apps/web db:restore-drill`). It never reads the box's agent data dir. There is no `restic`/`borg`/`rclone` on the box and no second backup unit; the server has no attached volume (state sits on the root disk) and no provider-level snapshots. So the gap is the **capture**, not a missing restore tool — there is nothing captured to restore, and a rebuilder should not go looking for one. A box-state snapshot leg is **in flight** in a parallel change; until it merges, treat box state as disposable and re-derivable from the repo.
+**The daily backup has TWO legs, and they cover different things.** [`fluncle-backup`](#the-database-backup-cron-live) leg 1 dumps the **prod Turso database** and only that: read over the libSQL HTTP pipeline, gzipped, PUT to the private backup bucket under `db-backups/` (off Cloudflare, 30-daily / 12-monthly, restore-drilled by `bun run --cwd apps/web db:restore-drill`). **Leg 2** then tars the load-bearing subset of the box's agent data dir, seals it with AES-256-GCM, and PUTs it under `box-state/` with a plaintext manifest and its own 14-daily / 6-monthly retention — proven end-to-end by `bun docs/agents/hermes/scripts/box-state-restore-drill.ts`. Leg 2 runs only AFTER leg 1 is durable, so it can never cost the night's dump, and a leg-2 failure marks the whole run `ok: false` so a half-backup cannot read green. **Two caveats that matter on a rebuild:** with no `FLUNCLE_BOXSTATE_KEY` leg 2 uploads nothing and still reports `ok: true`, and the server has no attached volume or provider-level snapshots — so anything outside leg 2's include list (the bootstrap token, the `op` templates, the deliberately-excluded workspaces and caches) is re-placed by hand.
 
 ### Operator activation runbook (one-time cutover)
 
