@@ -12,14 +12,14 @@ description: >-
 
 # Fluncle embed batch — clear the catalogue embedding backlog
 
-The on-box `fluncle-embed` sweep embeds ~a dozen tracks a day on rave-02's CPU. That is fine for the certified archive (Fluncle finds ~15 tracks a _week_) and hopeless for the catalogue, which arrives in the thousands. A catalogue track with no MuQ vector is a track **The Ear cannot hear at all** — it can't be ranked, recommended, or found by "sounds like". So the backlog is worked down in **batches**, off-box, by the operator, when embedding is the throttle.
+The on-box `fluncle-embed` sweep embeds ~a dozen tracks a day on rave-02's CPU. That is fine for the certified archive (Fluncle finds ~15 tracks a _week_) and hopeless for the catalogue, which arrives in the thousands. A catalogue track with no MuQ vector is a track **The Ear cannot hear at all** — it can't be ranked, recommended, or found by "sounds like". So the backlog is worked down in **batches**, off-box, when embedding is the throttle — and an agent can drive either path end to end.
 
 This is the same job in a bigger shape: `embed-batch.ts` takes tracks off the **same** `list_track_work?kind=embed` queue, pulls their audio from private R2, embeds them, and writes the vectors back through the **same** agent-tier API. Two places to run it:
 
 | Target                  | Speed                       | Cost              | Best for                                                         |
 | ----------------------- | --------------------------- | ----------------- | ---------------------------------------------------------------- |
 | **M5 (this Mac, CPU)**  | ~900 / overnight (~1.5/min) | free (owned)      | backlogs up to a few thousand; no provisioning, run it and sleep |
-| **RunPod GPU (rented)** | ~11/min (~660/hr)           | paid, by the hour | large backlogs (many thousands) you want cleared fast            |
+| **RunPod GPU (rented)** | ~21/min (~1,300/hr)         | paid, by the hour | large backlogs (many thousands) you want cleared fast            |
 
 The M5 runs on **CPU, not the Metal GPU** — `embed-track.py` only branches `cuda` vs `cpu` (`auto` → cpu when there's no CUDA), and that is deliberate: the decode → window → mean-pool → L2-normalize pipeline _is_ the embedding contract, and a second copy of it on a different device is how two vectors of the "same" track silently stop being comparable. Don't add an `mps` path to make the M5 "faster" — you'd fork the vector space.
 
@@ -91,22 +91,85 @@ The **Mac must stay awake** for the night — make sure a `caffeinate` is runnin
 
 ## Path B — the RunPod GPU rental
 
-Paid, fast (~11/min), for large backlogs. **Nothing in the repo can start a pod — the operator rents it, runs the batch, and destroys it.** Full step-by-step (rent the PyTorch pod, disk for two pages of audio, the `embed-batch.sh` bootstrap curl, tuning) is the "runbook (operator-fired)" section of [`docs/gpu-batch-embed.md`](../../../docs/gpu-batch-embed.md); the essentials:
+Paid, fast, for large backlogs. **An agent drives this end-to-end** — provision, run, monitor, destroy — because a `RUNPOD_API_KEY` lives in the vault next to the other secrets (concrete `op://` path: the private companion runbook). Earlier versions of this skill said a pod could only be rented by hand; that is no longer true, and the dashboard is not part of the loop. The architecture is [`docs/gpu-batch-embed.md`](../../../docs/gpu-batch-embed.md); this is the operating procedure.
 
-1. **Rent the block deliberately** — `remaining ÷ tracksPerMinute` (from a prior run's summary) is the minutes you need. A single mid-range CUDA GPU is plenty (MuQ-large is ~300M params; it's VRAM- and download-bound, not FLOPs-bound).
-2. **Bootstrap + run** on the pod, secrets in its env:
-   ```bash
-   MUQ_DEVICE=cuda MUQ_WINDOW_BATCH=8 bun docs/agents/hermes/scripts/embed-batch.ts --minutes 55
-   ```
-3. **`--minutes` is the rented block minus a margin** — the run keeps pulling pages until the queue is dry or the clock is spent, and spilling one minute past an hour boundary buys a whole second hour. Stop short on purpose:
+Everything below was measured on a live run, 2026-07-26. The traps are the expensive part — a pod that is up and billing but silently doing nothing looks exactly like a pod that is working.
 
-   | rented  | `--minutes`    |
-   | ------- | -------------- |
-   | 1 hour  | `55` (default) |
-   | 2 hours | `115`          |
-   | 4 hours | `235`          |
+### The API: two endpoints, split by job
 
-4. **Destroy the pod** when the run returns — it bills while it exists, not while it works.
+| Need                                | Where                                                                                |
+| ----------------------------------- | ------------------------------------------------------------------------------------ |
+| create / status / **destroy** a pod | REST `https://rest.runpod.io/v1/pods` (`POST`, `GET /{id}`, `DELETE /{id}`)          |
+| list GPU types + prices             | **GraphQL only** — `POST https://api.runpod.io/graphql`, query `gpuTypes`            |
+| real uptime + the mapped SSH port   | **GraphQL only** — `pod(input:{podId})  { runtime { uptimeInSeconds ports { … } } }` |
+| container logs                      | nowhere — **there is no logs API**. SSH is the only way to see inside.               |
+
+Both take `Authorization: Bearer $RUNPOD_API_KEY`. Two shape traps: REST has **no** `gpu-types` path, and REST's `runtime` field reads `null` on a pod that is perfectly alive — read uptime from GraphQL or you will diagnose a healthy pod as dead.
+
+### Pick the GPU
+
+MuQ-large is ~300M params and the job is download- and VRAM-bound, not FLOPs-bound, so cheapest-with-enough-VRAM wins. Anything ≥16 GB is plenty; an **RTX A5000 (24 GB)** was the sweet spot at ~$0.16–0.27/hr. Pass several ids in `gpuTypeIds` (priority order) so provisioning falls through when the cheap one is unavailable.
+
+### Create the pod — let the image start itself
+
+```jsonc
+{
+  "name": "fluncle-embed-batch",
+  "imageName": "runpod/pytorch:2.1.0-py3.10-cuda11.8.0-devel-ubuntu22.04",
+  "gpuTypeIds": ["NVIDIA RTX A5000", "NVIDIA RTX A4000", "NVIDIA GeForce RTX 3090"],
+  "gpuCount": 1,
+  "containerDiskInGb": 60,
+  "volumeInGb": 20,
+  "interruptible": false,
+  "ports": ["22/tcp"],
+  "env": {
+    "PUBLIC_KEY": "<an ssh pubkey>",
+    "FLUNCLE_API_TOKEN": "…",
+    "R2_ACCOUNT_ID": "…",
+    "FLUNCLE_SOURCE_AUDIO_R2_ACCESS_KEY_ID": "…",
+    "FLUNCLE_SOURCE_AUDIO_R2_SECRET_ACCESS_KEY": "…",
+    "MUQ_DEVICE": "cuda",
+    "MUQ_WINDOW_BATCH": "8",
+  },
+}
+```
+
+**Do not pass `dockerStartCmd`.** It replaces the template's own CMD — which is what installs `PUBLIC_KEY` and starts `sshd` — so the batch runs with no shell and no logs, and a failure is indistinguishable from slow progress. Let the image boot normally, then SSH in and launch the batch yourself. That one decision is the difference between a diagnosable run and a blind one.
+
+### Get in, and find the secrets
+
+`ssh -i <key> -p <publicPort> root@<ip>` using the port from the GraphQL `ports` entry with `privatePort: 22`. Add `-o IdentitiesOnly=yes -o IdentityAgent=none`, or a loaded agent offers every key first and the pod drops you with `Too many authentication failures`.
+
+Then the trap that stops the run dead: **the injected env vars are not in your SSH shell.** They live in **PID 1's** environment, and `/etc/rp_environment` holds only RunPod's own `RUNPOD_*` vars. Import them:
+
+```bash
+while IFS= read -r -d '' kv; do case "$kv" in FLUNCLE_*|R2_*|MUQ_*) export "$kv";; esac; done < /proc/1/environ
+```
+
+### Run it
+
+```bash
+export PATH="$HOME/.bun/bin:$PATH" PYTHON_BIN=python3 MUQ_DEVICE=cuda MUQ_WINDOW_BATCH=8
+cd /workspace/fluncle
+bun docs/agents/hermes/scripts/embed-batch.ts --minutes 540 --dry-run   # gate: expect queued ~N
+nohup bun docs/agents/hermes/scripts/embed-batch.ts --minutes 540 > /workspace/embed-run.log 2>&1 &
+```
+
+Confirm with `grep -c ': embedded' /workspace/embed-run.log` climbing within ~2 min. Use `embed-batch.sh` (the bootstrap curl) for a cold pod — it installs ffmpeg, bun, muq, clones the repo, and pre-warms the ~1 GB of MuQ weights. If you install by hand instead, **pin `transformers==4.40.2` and `numpy<2`**: `muq` leaves both unpinned, and on this image transformers 5.x (needs torch ≥ 2.2) dies with `NameError: name 'torch' is not defined` while numpy 2.x breaks the decode path with `_ARRAY_API not found`. Neither fails at install time — the run just never embeds. The bootstrap now pins them; a hand-rolled `pip install muq` still walks into it.
+
+### Monitor from the Mac, and make the destroy session-proof
+
+You cannot read the pod's log without SSH, but you do not need to: the **embed queue count is the progress bar**, and it is authoritative. Poll `list_track_work?kind=embed&count=true` and compare against the baseline you started from — noting that the queue also _climbs_ on its own as the analysis sweep feeds it, so judge progress relative to baseline, never by "the number went up".
+
+Run the poll loop as a **detached process that holds the `DELETE`**, so the pod dies even if the session ends: bill stops on `DELETE`, not when the batch process exits. Give it a drained-exit (queue at floor), a plateau guard, and a never-started abort — but **set never-started well above an hour**. Cold setup (image pull + apt + bun + muq + weights) legitimately takes tens of minutes before the first embed, and a 45-minute abort will execute a healthy pod just as it gets going.
+
+### The GPU is not the bottleneck — the downloads are
+
+Sampled during a live run, the GPU sat at **0% utilization seven samples out of eight**, spiking to ~16% and ~1.5 GB VRAM in short bursts between long waits on R2. The pod spends most of its life fetching audio, which is why a cheap 16–24 GB card is genuinely enough and why a beefier one buys you almost nothing. If a run needs to go faster, raise `FLUNCLE_EMBED_DOWNLOAD_CONCURRENCY` (12 was comfortable) before reaching for a bigger GPU — and remember the pod bills the idle time either way.
+
+### `--minutes` and the clock
+
+The run is clock-bound: it keeps pulling pages until the queue is dry or the budget is spent. With API-driven teardown the monitor destroys the pod the moment the queue drains, so set `--minutes` as a generous **backstop** above the expected drain (`remaining ÷ tracksPerMinute`) rather than trimming it to an hour boundary. `--minutes 540` for an overnight-sized backlog is fine; the pod will not outlive the work.
 
 ---
 
@@ -133,7 +196,12 @@ An embedded-but-unranked track is in the archive but not yet placed in The Ear's
 - **The M5 embeds on CPU by design** — no `mps` path. Faster-looking on paper, but a different device drifts the vectors out of the shared space. Leave it.
 - **Wrong R2 creds → silent 403** — the generic `.dev.vars` R2 key is the public bucket; `downloadFailed` = batch size and `queue_blocked` is the tell. Use the source-audio R2 item's custom fields.
 - **`missing_r2_credentials`** is an empty env var (an `op read` returned nothing), never a code bug — the dry-run catches it before you commit a night or an hour.
-- **The run is clock-bound, not queue-bound** — on RunPod stop short of the hour boundary; on the unmetered M5 over-provision and let it dry out.
+- **The run is clock-bound, not queue-bound** — on RunPod set `--minutes` as a backstop and let the monitor destroy on drain; on the unmetered M5 over-provision and let it dry out.
+- **A silent pod looks exactly like a working pod** — RunPod has no logs API, and a bootstrap that died still leaves the pod `RUNNING` and billing. Never infer health from pod status; infer it from the embed queue falling, or from the log over SSH.
+- **`dockerStartCmd` buys you a blind pod** — it replaces the template CMD that starts `sshd`, so you lose the only way in. Let the image boot itself and launch the batch over SSH.
+- **The pod's env is in PID 1, not your shell** — SSH in and the injected secrets are simply absent (`/etc/rp_environment` only carries RunPod's own vars). Import from `/proc/1/environ`.
+- **`pip install muq` resolves deps that break the image** — unpinned, it takes transformers 5.x and numpy 2.x, both fatal against the template's torch 2.1, and neither errors at install time. The bootstrap pins `transformers==4.40.2` + `numpy<2`; keep the pins if you touch it.
+- **Do not abort a slow start too early** — cold setup runs tens of minutes before the first embed. A 45-minute never-started guard killed a healthy pod mid-warmup on the first attempt.
 - **Always resumable** — an embedded track leaves the `embedding_json IS NULL` queue and write-back is per-track, so a reclaimed pod or a slept Mac loses nothing. Just launch again.
 - **The batch can only measure, never speak** — it sends `{ embedding }` and nothing else; the certification rail 409s anything that would make Fluncle _say_ something about a track. Safe to run against uncertified catalogue rows all day.
 

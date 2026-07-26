@@ -70,9 +70,18 @@ if ! command -v bun >/dev/null 2>&1; then
   export PATH="${HOME}/.bun/bin:${PATH}"
 fi
 
-echo "==> muq + numpy (torch is already in the PyTorch template — do NOT reinstall it, the"
+echo "==> muq + its deps (torch is already in the PyTorch template — do NOT reinstall it, the"
 echo "    template's build is the one matched to this pod's CUDA)"
-python3 -m pip install --quiet --upgrade muq numpy
+# muq declares `transformers` and `numpy` UNPINNED, so an unconstrained install resolves the current
+# major of each — and on this image both are fatal against the template's torch 2.1:
+#   transformers 5.x needs torch >= 2.2 and dies at import with `NameError: name 'torch' is not
+#     defined` (torch 2.1 has no `torch.utils._pytree.register_pytree_node`),
+#   numpy 2.x is not what torch 2.1 was built against — `Failed to initialize NumPy: _ARRAY_API not
+#     found`, which silently takes out the decode path.
+# Neither surfaces as a clean error at install time; the run just never embeds. Pin both to the
+# versions proven against this image, and never `--upgrade` (that is what drags numpy to 2.x).
+# Measured on an RTX A5000 pod, 2026-07-26.
+python3 -m pip install --quiet muq "transformers==4.40.2" "numpy<2"
 
 echo "==> repo"
 if [ -d "${WORKDIR}/.git" ]; then
@@ -82,7 +91,7 @@ else
   git clone --depth 1 "${REPO_URL}" "${WORKDIR}"
 fi
 
-echo "==> warming the MuQ weights (a first `from_pretrained` downloads ~1 GB; do it once, before"
+echo "==> warming the MuQ weights (a first from_pretrained downloads ~1 GB; do it once, before"
 echo "    the batch, so a slow HF pull is not billed as GPU time inside the run)"
 python3 - <<'PY'
 from muq import MuQ
