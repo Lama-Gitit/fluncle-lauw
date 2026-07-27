@@ -90,7 +90,7 @@ Cues are usually refined **after** the set is already live, so the cue rail's le
 
 # Unit C — the footage cut (the box)
 
-The deterministic cut that turns each `pending` `mixtape_clips` row into a clean, cropped 9:16 clip on R2, then marks it `done`. It runs on the **always-on Hermes box (rave-02)**, not the GPU render box — a CPU-trivial ffmpeg trim, no GPU, no `claude -p`, none of the render box's agent machinery.
+The deterministic cut that turns each `pending` `mixtape_clips` row into a clean, cropped 9:16 clip on R2, then marks it `done`. It runs on the **always-on Hermes box (rave-02)**, not the render box — a CPU-trivial ffmpeg trim, no `claude -p`, none of the render box's agent machinery.
 
 ## What it does
 
@@ -108,7 +108,7 @@ For one pending clip: pull its recording's staged set rendition (the recording's
 
 ## The cron (`fluncle-studio-clip`)
 
-`docs/agents/hermes/scripts/clip-sweep.{sh,ts}` — a `--no-agent` pure-trigger sweep (the enrich-sweep shape, no `claude -p`). Each tick: `fluncle admin clips list --status pending --json` → for a bounded batch (default 1, `CLIP_BATCH_CAP`), `fluncle admin clips cut <clipId>`. Idempotent: a `done` clip is out of the next tick's `pending` read, and a not-yet-staged clip is skipped (stays `pending`) without blocking the batch — so no single-flight lock is needed (unlike the GPU render conductor). The batch is small so a tick stays under the Hermes `--no-agent` 120 s kill.
+`docs/agents/hermes/scripts/clip-sweep.{sh,ts}` — a `--no-agent` pure-trigger sweep (the enrich-sweep shape, no `claude -p`). Each tick: `fluncle admin clips list --status pending --json` → for a bounded batch (default 1, `CLIP_BATCH_CAP`), `fluncle admin clips cut <clipId>`. Idempotent: a `done` clip is out of the next tick's `pending` read, and a not-yet-staged clip is skipped (stays `pending`) without blocking the batch — so no single-flight lock is needed (unlike the render conductor). The batch is small so a tick stays under the Hermes `--no-agent` 120 s kill.
 
 ## The agent-tier ops (the box's agent token)
 

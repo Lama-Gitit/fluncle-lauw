@@ -1,12 +1,14 @@
 # The render conductor (`fluncle-render`)
 
-The end-to-end doctrine for Fluncle's per-finding VIDEO render pipeline: how a queued finding becomes a shipped video on a GPU box that is asleep the rest of the time. This is the canonical home for the pipeline; the cron-roster row and the wiring summary live in [`hermes/cron/README.md`](./hermes/cron/README.md), and the operator's runbook (the exact reap/forensics/requeue recipes, box IDs, and secret map) is the private companion repo (`fluncle-labs`) plus the [`fluncle-hermes-operator`](../../packages/skills/fluncle-hermes-operator) skill.
+The end-to-end doctrine for Fluncle's per-finding VIDEO render pipeline: how a queued finding becomes a shipped video on a box that is asleep the rest of the time. This is the canonical home for the pipeline; the cron-roster row and the wiring summary live in [`hermes/cron/README.md`](./hermes/cron/README.md), and the operator's runbook (the exact reap/forensics/requeue recipes, box IDs, and secret map) is the private companion repo (`fluncle-labs`) plus the [`fluncle-hermes-operator`](../../packages/skills/fluncle-hermes-operator) skill.
 
 > This repo is public. No hostnames, box IDs, ports, `op://` paths, or `/Users/…` paths live here — this doc is the architecture and the procedure; concrete access recipes are the ops runbook in the private companion repo.
 
 ## The shape
 
-`fluncle-render` is unlike every other Hermes sweep. The other sweeps run their whole job inside the Hermes orchestrator box; this one is a **conductor**. The Hermes box has no GPU and no Remotion toolchain, so the conductor wakes a separate **scale-to-zero box.ascii GPU render box (rave-03)**, triggers the `@fluncle-video` render of exactly one queued finding _there_, and parks the box when the render finishes. The render box renders + **ships to R2 / the website** (it sets `video_url`); it **never posts to social** — enforced twice over: the render-queue prompt's hard rail says don't, AND the server-side role boundary makes it impossible (the box carries only the `agent`-scoped token, and every publish-class route is operator-tier → 403, so a misbehaving render agent _cannot_ post).
+`fluncle-render` is unlike every other Hermes sweep. The other sweeps run their whole job inside the Hermes orchestrator box; this one is a **conductor**. The Hermes box carries no Remotion toolchain, and a render is a ~75–90 minute CPU hog that would both blow the runner's ~120s kill and starve the 5-minute sweeps it shares the box with — so the conductor wakes a separate **scale-to-zero box.ascii render box (rave-03)**, triggers the `@fluncle-video` render of exactly one queued finding _there_, and parks the box when the render finishes.
+
+**There is no GPU anywhere in this pipeline, and that is deliberate.** The conductor pins `FLUNCLE_GL=swangle` — software GL — into every render's environment, so frames rasterize on the CPU. That is what makes the render box disposable: any box.ascii box can run it, a purge is a ~5-minute reprovision from `main`, and there is no accelerator to match or driver to pin. The cost is wall-clock (hence the ~75–90 minute renders and the detached, two-state design below), which the hourly cadence absorbs. Older revisions of this doc, `AGENTS.md`, and the operator skill all called rave-03 a "GPU render box"; that was never true of the render path and the label is retired. The render box renders + **ships to R2 / the website** (it sets `video_url`); it **never posts to social** — enforced twice over: the render-queue prompt's hard rail says don't, AND the server-side role boundary makes it impossible (the box carries only the `agent`-scoped token, and every publish-class route is operator-tier → 403, so a misbehaving render agent _cannot_ post).
 
 The conductor is a rave-02 HOST systemd timer (`fluncle-render.timer`/`.service`, every 60m — installed by [`hermes/install-host-timers.sh`](./hermes/), unit dir [`hermes/render-timer/`](./hermes/render-timer/)) that runs [`hermes/scripts/render-conductor.sh`](./hermes/scripts/render-conductor.sh). The script bakes into the Hermes image at `/opt/hermes-scripts` and auto-redeploys on merge to `main` via the on-box `pin-watch` self-deploy timer (`pin-watch` is the one host unit off the `fluncle-*` naming pattern). Its two companion scripts: [`provision-rave-03.sh`](./hermes/scripts/provision-rave-03.sh) reproduces the render box from clean `main`, and [`render-detached.sh`](./hermes/scripts/render-detached.sh) runs on the render box.
 
@@ -79,6 +81,20 @@ When a box goes stale or wedged — the checkout freshen silently failing on fla
 4. Trigger the render service — the conductor cold-provisions a fresh box from clean `main`.
 
 The conductor already condemns a box that fails to launch a render (it deletes the box, clears the box-id, and stays idle so a fresh box provisions next tick). The manual reap is for the cases its own guards do not catch. The exact commands (box IDs, state-file path) are the ops runbook in the private companion repo.
+
+### A condemn ends with the box gone, or with its id written down
+
+The condemn used to be fire-and-forget — `box stop` and `box delete` under `>/dev/null 2>&1 || true`, then the box-id file cleared **regardless**. A box.ascii 5xx therefore meant the conductor forgot the id while the box lived on, referenced by nothing and reachable by no later tick.
+
+That is not hypothetical. On 2026-07-27 a render finished and the conductor chained straight to the next pick; the resume raced the park, box.ascii answered `box_restoring (500)` to every call, the trigger never launched, and the condemn's `stop` + `delete` hit the same 500 silently. The conductor cleared its box-id and moved on. The next tick provisioned a fresh box beside the abandoned one, which sat in the account until an operator noticed.
+
+So the condemn now has a contract: **it ends with the box PROVEN absent, or with its id recorded for a later tick.** Three pieces enforce it, all in `render-conductor.sh`:
+
+- **`box_gone`** returns success ONLY when a `box list` positively proves the id is absent. An unreachable API, a failed list, or an empty body is "not proven gone", never "deleted" — otherwise one wobble would drop an id from the ledger and orphan that box for good.
+- **`condemn_box`** retries `stop`+`delete` `CONDEMN_ATTEMPTS` times (default 3, `CONDEMN_BACKOFF` 3s apart — `box_restoring` is transient and usually clears inside that). If the box still is not gone, the id goes to the **orphan ledger** (`~/.render-conductor/orphan-boxes`, one id per line) and the operator gets one Discord alert.
+- **`reap_orphans`** drains that ledger at the top of **every** tick, idle or rendering, bounded by `REAP_PER_TICK` (default 5) so a long ledger can never eat the tick budget. It runs before the state machine on purpose: a wedged box is precisely the case where the next tick is busy rendering on its replacement, so gating the reap on `idle` would leave the orphan standing for the length of a render.
+
+The net effect is that a box.ascii outage costs a delayed cleanup rather than a permanent orphan, with no operator involvement. A non-empty ledger that survives several ticks is the signal that something needs a look — that is what the alert is for.
 
 ## Snapshot forensics (read a stopped box without resuming)
 

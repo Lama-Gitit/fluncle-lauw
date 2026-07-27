@@ -69,9 +69,11 @@ BOXID_FILE="$STATE_DIR/box-id"         # the current/last box.ascii id
 STARTED_FILE="$STATE_DIR/started-at"   # epoch of the last render START
 RENDER_LOGID_FILE="$STATE_DIR/render-logid" # logId of the in-flight render (its cost scope)
 FAILS_FILE="$STATE_DIR/fail-counts"    # poison ledger: logId<TAB>count<TAB>lastFailEpoch
+ORPHANS_FILE="$STATE_DIR/orphan-boxes" # box ids condemned but not yet PROVEN deleted (one per line)
 LOCK_DIR="$STATE_DIR/lock.d"           # atomic-mkdir single-flight lock
 LOG_FILE="$STATE_DIR/conductor.log"
 [ -f "$FAILS_FILE" ] || : >"$FAILS_FILE" # keep it present so the awk helpers never error on a first run
+[ -f "$ORPHANS_FILE" ] || : >"$ORPHANS_FILE"
 # The box CLI keeps its auth under $HOME/.ascii; HOME is the mounted, persisted
 # /opt/data/home, so `box login` survives container restarts.
 
@@ -90,6 +92,13 @@ MARKER_SKEW="${MARKER_SKEW:-300}"         # clock-skew grace when checking a don
 # re-poisons). A clean render clears that finding's ledger.
 POISON_THRESHOLD="${POISON_THRESHOLD:-3}" # consecutive render failures before a finding is skipped
 POISON_TTL="${POISON_TTL:-21600}"         # seconds a poisoned finding is skipped before one retry (6h)
+# Condemning a box must END with the box gone or with its id written down. box.ascii 5xxs
+# transiently (a `box_restoring` window right after a park), so retry briefly in-tick, then
+# hand the id to the orphan ledger every later tick drains. 3 tries ~= 6s + API latency,
+# well inside the unit's ~120s kill.
+CONDEMN_ATTEMPTS="${CONDEMN_ATTEMPTS:-3}" # in-tick stop+delete retries before an id is filed as an orphan
+CONDEMN_BACKOFF="${CONDEMN_BACKOFF:-3}"   # seconds between those retries
+REAP_PER_TICK="${REAP_PER_TICK:-5}"       # max orphan boxes a single tick will try to reap (tick-budget guard)
 DONE_MARKER='${HOME:-/home/user}/conductor-run.done'
 API_URL="${FLUNCLE_API_URL:-https://www.fluncle.com}"
 
@@ -148,6 +157,95 @@ discord_alert() {
   curl -sS -o /dev/null --max-time 10 -H 'Content-Type: application/json' \
     -d "$(printf '{"content":"%s"}' "$1")" \
     "$DISCORD_ALERT_WEBHOOK" 2>>"$LOG_FILE" || true
+}
+
+# --- box lifecycle: condemn + orphan reaping ---------------------------------------
+# Deleting a render box used to be fire-and-forget: `stop`/`delete` under
+# `>/dev/null 2>&1 || true`, then the box-id file was cleared REGARDLESS. So a box.ascii
+# 5xx meant the conductor forgot the id while the box lived on, unreferenced, forever.
+# That is not theoretical — 2026-07-27: a park/resume race left the box `restoring`, every
+# call 500'd, and bx_hyzhuhh5 was orphaned in the account while the very next tick
+# provisioned a fresh box beside it. The rule now: a condemn ends with the box PROVEN gone,
+# or with its id written down. Nothing is ever merely hoped-deleted.
+
+# `0` (success) ONLY when box.ascii PROVES the id is absent. An unreachable API, a failed
+# list, or an empty body returns non-zero — "not proven gone" must never read as "deleted",
+# or one wobble would drop an id from the ledger and orphan that box permanently.
+box_gone() {
+  local id="$1" out
+  [ -n "$id" ] || return 0
+  out="$("$BOX_BIN" list --json 2>/dev/null)" || return 1
+  case "$out" in
+    '') return 1 ;;                        # empty body is not proof of absence
+    *"\"id\":\"$id\""*) return 1 ;;        # exact key match; a substring test could hit a longer id
+    *) return 0 ;;
+  esac
+}
+
+add_orphan() {
+  local id="$1"
+  [ -n "$id" ] || return 0
+  grep -qxF "$id" "$ORPHANS_FILE" 2>/dev/null && return 0
+  printf '%s\n' "$id" >>"$ORPHANS_FILE"
+  discord_alert "render conductor: could not delete render box $id — filed as an orphan, later ticks will retry ($API_URL/admin)"
+}
+
+drop_orphan() {
+  local id="$1"
+  [ -n "$id" ] || return 0
+  [ -f "$ORPHANS_FILE" ] || return 0
+  # `grep -v` exits 1 when NOTHING is left to print (the ledger draining to empty), so the
+  # mv must NOT hang off its status — chaining `&&` here would make the LAST orphan
+  # un-droppable and the ledger permanently non-empty.
+  grep -vxF "$id" "$ORPHANS_FILE" >"$ORPHANS_FILE.tmp" 2>/dev/null
+  mv "$ORPHANS_FILE.tmp" "$ORPHANS_FILE" 2>/dev/null || true
+}
+
+# Stop + delete a box and PROVE it is gone; file the id for a later tick if it is not.
+condemn_box() {
+  local id="$1" attempt=1
+  [ -n "$id" ] || return 0
+  while :; do
+    "$BOX_BIN" stop "$id" >>"$LOG_FILE" 2>&1 || true
+    "$BOX_BIN" delete "$id" >>"$LOG_FILE" 2>&1 || true
+    if box_gone "$id"; then
+      log "condemned box $id — deleted (attempt $attempt)"
+      drop_orphan "$id"
+      return 0
+    fi
+    [ "$attempt" -ge "$CONDEMN_ATTEMPTS" ] && break
+    attempt=$((attempt + 1))
+    sleep "$CONDEMN_BACKOFF"
+  done
+  add_orphan "$id"
+  log "could not delete box $id after $CONDEMN_ATTEMPTS attempts — filed to the orphan ledger"
+  return 1
+}
+
+# Drain the orphan ledger, bounded by REAP_PER_TICK so a long ledger can never eat the
+# tick budget. Runs every tick, so an id filed while box.ascii was wobbling is deleted as
+# soon as the API is healthy again with no operator involvement. (The `while read` holds an
+# fd on the ledger while drop_orphan rewrites it via temp+mv; the loop keeps iterating the
+# original list and each drop composes onto the current file, which is what we want.)
+reap_orphans() {
+  local id reaped=0
+  [ -s "$ORPHANS_FILE" ] || return 0
+  while IFS= read -r id; do
+    [ -n "$id" ] || continue
+    [ "$reaped" -lt "$REAP_PER_TICK" ] || break
+    reaped=$((reaped + 1))
+    if box_gone "$id"; then
+      log "orphan $id already gone — dropping from the ledger"
+      drop_orphan "$id"
+      continue
+    fi
+    "$BOX_BIN" stop "$id" >>"$LOG_FILE" 2>&1 || true
+    "$BOX_BIN" delete "$id" >>"$LOG_FILE" 2>&1 || true
+    if box_gone "$id"; then
+      log "reaped orphan box $id"
+      drop_orphan "$id"
+    fi
+  done <"$ORPHANS_FILE"
 }
 
 # --- poison ledger (head-of-line-block guard; see POISON_* config) -----------------
@@ -281,6 +379,12 @@ if ! "$BOX_BIN" login "$BOX_API_KEY" >>"$LOG_FILE" 2>&1; then
   emit_fail "render-conductor: box.ascii auth failed"
   exit 1
 fi
+
+# Drain any box a previous tick condemned but could not delete. Deliberately BEFORE the
+# state machine and on every tick (idle or rendering): a wedged box is exactly the case
+# where the next tick is busy rendering on its replacement, so gating this on idle would
+# leave the orphan standing for as long as the render runs. No-ops on an empty ledger.
+reap_orphans
 
 state="$(read_or "$STATE_FILE" idle)"
 boxid="$(read_or "$BOXID_FILE" '')"
@@ -525,8 +629,10 @@ printf '%s\n' "$trigger_out" >>"$LOG_FILE"
 if ! printf '%s' "$trigger_out" | grep -q 'render-detached: launched'; then
   log "render trigger did not launch on $boxid (wedged box) — deleting it + staying idle to reprovision"
   emit_fail "render-conductor: render trigger failed on $boxid — box condemned, reprovision next tick"
-  "$BOX_BIN" stop "$boxid" >/dev/null 2>&1 || true
-  "$BOX_BIN" delete "$boxid" >/dev/null 2>&1 || true
+  # condemn_box retries the delete and, if box.ascii still will not take it, files the id
+  # to the orphan ledger. Clearing BOXID_FILE below is what makes the next tick provision a
+  # fresh box, so the id MUST be written down first or it is lost with this variable.
+  condemn_box "$boxid" || true
   : >"$BOXID_FILE"
   printf 'idle' >"$STATE_FILE"
   exit 1
