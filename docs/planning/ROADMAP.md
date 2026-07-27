@@ -17,7 +17,7 @@ The headline epic, and the last big change before go-to-market. This section rec
 ### The sequencing — freeze, overhaul, go-to-market
 
 - **New feature development stops first.** The freeze is the precondition, not a side effect: the overhaul re-decides what the surfaces are for, so shipping new surfaces into it is wasted work.
-- **The housekeeping sweep was the clean slate.** The 2026-07-26 sweep (19 PRs — docs truth, hygiene, security hardening, perf) is what the overhaul starts from; its residual operator decisions are listed under _Next → Housekeeping follow-ups_.
+- **The housekeeping sweep was the clean slate.** The overhaul starts from the 2026-07-26 sweep; its residual operator decisions are listed under _Next → Housekeeping follow-ups_.
 - **Then the overhaul** — the final big change before the project is marketed.
 - **Then go-to-market:** marketing the platform on Reddit, reaching out to record labels (the groundwork is _Next → Label outreach_), and going to DnB events to spread sticks / QR codes.
 
@@ -37,7 +37,7 @@ The add → live pipeline is operational end to end — the one `/admin` cockpit
 
 ### Operator activations — the flips that cost one session
 
-One flip remains (ruled to wait); the 2026-07-27 activation session cleared the rest — the bio/logbook/triage sweeps turned out to be already enabled and ticking on the box, Twitch is connected and collecting, the hardened DNS binary is live on the dig host, and the post-deploy edge-cache purge fired for the first time with the build-env token in place.
+One flip remains, deliberately held.
 
 - [ ] **Publish-advance: resume it and watch one finding land** _(ruled 2026-07-27: stays dark for now — flip when ready)_. `fluncle admin publish resume` (or the toggle on `/admin/findings`). The repo half and the host-timer unit are committed (`docs/agents/hermes/publish-advance-timer/`) and the kill switch is **default-deny** — an absent setting reads as paused, so nothing posts until the flip. Doctrine: [docs/track-lifecycle.md](../track-lifecycle.md) § _The render → publish auto-advance_.
 
@@ -64,13 +64,13 @@ Monitoring, not work. Collapsed here so it stops occupying build sections.
 
 ### Dependency vulnerability posture — 18 open alerts (measured 2026-07-26)
 
-The 2026-07-26 audit triaged all 18 open alerts: **zero fix-now** — 13 sat on the `.deepsec` operator tool (cleared by the deepsec 2.2.9 bump, shipped 2026-07-27; Dependabot resolves them on rescan) and 5 on `apps/sonar` (3 dismiss-candidates queued as operator clicks, 2 watch — upstream-pinned, no reachable patch). What remains is the standing policy — what severity auto-merges, what waits for `minimumReleaseAge`, and who reads the queue — plus the CI-side half (`bun audit` + the Renovate npm extension, the follow-ups item below). Ledger row: `docs/audit-backlog.md` (security, 2026-07-12).
+Every open alert is triaged (zero fix-now; the analysis lives in the ledger and the triage report). What is ahead: the three dismiss-candidate clicks on the `apps/sonar` alerts (operator, reason "vulnerable code is not actually used"), two upstream-pinned watches that close themselves when libsql's chain moves, the standing policy — what severity auto-merges, what waits for `minimumReleaseAge`, and who reads the queue — and the CI-side half (`bun audit` + the Renovate npm extension, the follow-ups item below). Ledger row: `docs/audit-backlog.md` (security, 2026-07-12).
 
 ### Housekeeping follow-ups — operator decisions pending (2026-07-26 sweep)
 
-The 2026-07-27 rulings session settled most of the sweep's queue (HSTS posture kept, branch protection gained the required gitleaks check, fontWeight 800 ratified, the ports rule amended, `update_mixtape_cue` retired, the cover PNGs stay uncommitted, the "sync" gloss deliberately unruled, the OAuth handoff shipped). What is still open:
+Most of the sweep's queue is settled (git history + the ledgers hold the rulings). What is still open:
 
-- [ ] **CSP graduation.** `security-headers.ts` ships an enforcing `frame-ancestors 'self'` plus a full `Content-Security-Policy-Report-Only` policy. The **report sink is wired** — violations POST to Sentry's Security feed (`report-uri` + `report-to`/`Reporting-Endpoints`, public https origins only; see [docs/error-tracking.md](../error-tracking.md)). The first watch-window catch is already absorbed (2026-07-27): two genuine first-party hosts joined `img-src` (the analytics image beacon and the Cover Art Archive fallback covers, FLUNCLE-WEB-5/6) and the one `eval:` report was archived as extension-injected noise. What remains is the operator's: let the now-clean feed run across a real traffic window, then flip to enforcing.
+- [ ] **CSP graduation.** `security-headers.ts` ships an enforcing `frame-ancestors 'self'` plus a full `Content-Security-Policy-Report-Only` policy. Violations report to Sentry's Security feed ([docs/error-tracking.md](../error-tracking.md)); the feed is clean. What is ahead: let it run across a real traffic window — absorbing any genuine first-party host into the policy as it appears, archiving extension noise — then flip the report-only policy to enforcing.
 - [ ] **The dependency-hygiene remainder:** `bun audit --audit-level=high` as a CI job and the Renovate npm/bun extension — the two moves that close the `bun.lock` blind spot (the deepsec bump shipped 2026-07-27; the three Dependabot dismissals are queued operator clicks).
 
 The sonar release gate is a build and lives under _The enforcement gates_ below.
@@ -82,11 +82,9 @@ The build-fail coverage tests and `deploy:gate` are how this repo keeps architec
 - **Decide public-vs-admin by PATH, not op-name prefix.** `orpc-admin-coverage.test.ts` classifies with `PUBLIC_OP_PREFIXES` and `op.startsWith(p)`, so any admin op whose name happens to start with a public prefix silently escapes the registry check — a name collision punches a hole in a build-fail gate. Ledger row: `docs/audit-backlog.md` (architecture, 2026-07-26).
 - **Gate the sonar release.** `.github/workflows/sonar-release.yml` builds and publishes the rolling pre-release with no `cargo test`, no `clippy`, no `fmt --check`, and the box self-swaps off that release — so a merge to `apps/sonar/**` reaches the live engine ungated. This is the `deploy:gate` principle applied to the one deploy path that escapes it.
 
-### Sonar — fully commissioned; replication stays a tripwire
+### Sonar regional replication — a tripwire, not a task
 
-The vector-serving stack is live and, as of 2026-07-27, fully commissioned: all six per-surface flags are on (the `/recommendations` catalogue scan was the last — flipped after the `GET /health` pre-flight against the caps build), so every "sounds like" question runs as an exact in-memory SIMD scan in `apps/sonar` and the database's vector fold is pure fallback ([docs/vector-serving.md](../vector-serving.md)).
-
-- **Regional replication stays a tripwire, not a task.** One region today. A second is only correct once far-region _dynamic_ (uncached search / recs) traffic is a measured, meaningful share — and the Worker→engine hop must stay same-continent or the win is eaten. When the number appears, spin a box and register it; not before.
+The engine serves every "sounds like" surface from ONE region ([docs/vector-serving.md](../vector-serving.md)). A second region is only correct once far-region _dynamic_ (uncached search / recs) traffic is a measured, meaningful share — and the Worker→engine hop must stay same-continent or the win is eaten. When the number appears, spin a box and register it; not before.
 
 ### DB scale — the Wave-2 remainder and the index economics
 
