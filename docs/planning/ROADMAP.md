@@ -82,7 +82,6 @@ The 19-PR housekeeping sweep left a queue of calls the code cannot settle. Each 
 - [ ] **DESIGN.md `fontWeight` 700 vs the tokens' 800.** The canon doc and the tokens disagree; one of them is wrong.
 - [ ] **The hetzner-devbox skill's committed ports.** The skill commits a concrete SSH port. Rule on whether that is topology (and belongs in the private companion) or acceptable public detail — and amend either the skill or the rule, never leave the contradiction.
 - [ ] **The three mixtape-cover PNGs' committed home.** Decide where they live, or that they are generated rather than committed.
-- [ ] **The CLI OAuth `bind:none` handoff-URL follow-up.** A Bearer-started (CLI) OAuth flow mints an UNBOUND state — `apps/web/src/lib/server/oauth-state.ts:78` signs `bind: "none"` because the operator opens the auth URL in a different client, so no cookie exists to bind — leaving a CLI-minted state replayable inside its 10-minute window (the pre-hardening status quo, preserved not regressed; minting one requires the operator Bearer). Closing it means a Fluncle-origin handoff URL for the CLI path so the browser leg can pick up a bindable state.
 
 The DNS binary redeploy from the same sweep is an activation rather than a ruling and sits with the other flips under _Now → Operator activations_. The sonar release gate is a build and lives under _The enforcement gates_ below.
 
