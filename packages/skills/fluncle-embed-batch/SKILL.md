@@ -16,10 +16,10 @@ The on-box `fluncle-embed` sweep embeds ~a dozen tracks a day on rave-02's CPU. 
 
 This is the same job in a bigger shape: `embed-batch.ts` takes tracks off the **same** `list_track_work?kind=embed` queue, pulls their audio from private R2, embeds them, and writes the vectors back through the **same** agent-tier API. Two places to run it:
 
-| Target                  | Speed                       | Cost              | Best for                                                         |
-| ----------------------- | --------------------------- | ----------------- | ---------------------------------------------------------------- |
-| **M5 (this Mac, CPU)**  | ~900 / overnight (~1.5/min) | free (owned)      | backlogs up to a few thousand; no provisioning, run it and sleep |
-| **RunPod GPU (rented)** | ~21/min (~1,300/hr)         | paid, by the hour | large backlogs (many thousands) you want cleared fast            |
+| Target                  | Speed                                             | Cost              | Best for                                                         |
+| ----------------------- | ------------------------------------------------- | ----------------- | ---------------------------------------------------------------- |
+| **M5 (this Mac, CPU)**  | ~1,100+/overnight (~2.5/min, measured 2026-07-27) | free (owned)      | backlogs up to a few thousand; no provisioning, run it and sleep |
+| **RunPod GPU (rented)** | ~21/min (~1,300/hr)                               | paid, by the hour | large backlogs (many thousands) you want cleared fast            |
 
 The M5 runs on **CPU, not the Metal GPU** — `embed-track.py` only branches `cuda` vs `cpu` (`auto` → cpu when there's no CUDA), and that is deliberate: the decode → window → mean-pool → L2-normalize pipeline _is_ the embedding contract, and a second copy of it on a different device is how two vectors of the "same" track silently stop being comparable. Don't add an `mps` path to make the M5 "faster" — you'd fork the vector space.
 
@@ -63,7 +63,7 @@ The one thing genuinely reserved for the operator is the single fingerprint appr
 
 ## Path A — the M5 overnight run
 
-Free, unmetered, ~900 tracks a night on the M5's CPU. The right default for a backlog of a couple thousand or less. Because it's not billed, over-provision `--minutes` — the run stops on its own when the queue is dry.
+Free, unmetered, ~1,100+ tracks a night on the M5's CPU (2.47/min measured on the 2026-07-27 run, queue_dry after 1,119). The right default for a backlog of a couple thousand or less. Because it's not billed, over-provision `--minutes` — the run stops on its own when the queue is dry.
 
 Run this directly (agent or operator, **sandbox OFF** so `op` reaches the app socket), from the repo root. The three `op read`s trigger one biometric prompt the operator approves:
 
