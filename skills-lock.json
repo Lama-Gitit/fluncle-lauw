@@ -53,6 +53,11 @@
       "sourceType": "local",
       "computedHash": "65f14cb3e593ee3e3e7e2d4dbd1cf2bbccfae95dbc7ba8cb19adc1f55e539611"
     },
+    "fluncle-label-triage": {
+      "source": "packages/skills/fluncle-label-triage",
+      "sourceType": "local",
+      "computedHash": "2b03e036130333a0755b11b85c696913b0bd543b9029a0751bdbb096203e50e1"
+    },
     "fluncle-maintenance": {
       "source": "packages/skills/fluncle-maintenance",
       "sourceType": "local",
