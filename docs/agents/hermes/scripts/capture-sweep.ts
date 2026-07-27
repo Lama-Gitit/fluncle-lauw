@@ -146,6 +146,14 @@ const FFPROBE_BIN = process.env.FFPROBE_BIN ?? "ffprobe";
 // newest-first, so a fresh add is always in the first page and jumps the backfill.
 const QUEUE_LIMIT = Number(process.env.FLUNCLE_CAPTURE_QUEUE_LIMIT ?? "8");
 const BATCH_CAP = Number(process.env.FLUNCLE_CAPTURE_BATCH_CAP ?? "4");
+// Bounded parallel captures within one tick. Each capture is dominated by the proxy download
+// (~25-30s wall-clock, near-zero CPU), so 2-3 workers nearly multiply throughput; the SPEND
+// governor stays the rolling-24h budget meter, which the sweep consults per row either way —
+// concurrency raises the ceiling the meter can spend up to, never the spend itself.
+const CONCURRENCY = Math.max(
+  1,
+  Math.trunc(Number(process.env.FLUNCLE_CAPTURE_CONCURRENCY ?? "1")) || 1,
+);
 
 // Duration guard: accept a candidate whose length is within max(±3s, ±3%) of the
 // finding's Spotify duration. Duration catches the gross mismatches (edits/speed changes);
@@ -1374,18 +1382,33 @@ async function main(): Promise<void> {
 
   const counts = { done: 0, failed: 0, skipped: 0, unmatched: 0 };
 
-  for (const finding of batch) {
-    // Catch per-finding: one failure must never abort the tick.
-    try {
-      const outcome = await captureFinding(finding);
-      counts[outcome] += 1;
-    } catch (error) {
-      counts.failed += 1;
-      log(
-        `unexpected error on ${finding.trackId}: ${error instanceof Error ? error.message : String(error)}`,
-      );
+  // A fixed worker pool over the batch: `CONCURRENCY` workers each pull the next index. Catch
+  // per-finding inside the worker — one failure must never abort the tick or starve a worker.
+  let cursor = 0;
+  const worker = async (): Promise<void> => {
+    while (cursor < batch.length) {
+      const finding = batch[cursor];
+      cursor += 1;
+
+      if (!finding) {
+        return;
+      }
+
+      try {
+        const outcome = await captureFinding(finding);
+        counts[outcome] += 1;
+      } catch (error) {
+        counts.failed += 1;
+        log(
+          `unexpected error on ${finding.trackId}: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
     }
-  }
+  };
+
+  await Promise.all(
+    Array.from({ length: Math.min(CONCURRENCY, batch.length) || 1 }, () => worker()),
+  );
 
   console.log(
     JSON.stringify({
