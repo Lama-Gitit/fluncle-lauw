@@ -161,6 +161,11 @@
       "skillPath": "skills/seo-audit/SKILL.md",
       "computedHash": "f2dc52130189068981f21e1c0bdc4471ac7cd9b08d8a1320604411aa0f950385"
     },
+    "session-reflection": {
+      "source": "packages/skills/session-reflection",
+      "sourceType": "local",
+      "computedHash": "c28b50be4f0c703f64f17045131e47c3b71f41dc5481b8bd6b899138b2516aff"
+    },
     "shadcn": {
       "source": "shadcn/ui",
       "sourceType": "github",
