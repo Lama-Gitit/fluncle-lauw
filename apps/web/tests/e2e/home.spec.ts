@@ -87,3 +87,24 @@ test("home page SSRs the seeded findings, hydrates, and logs no errors", async (
   // (4) No console errors, no page errors — anything here is a real regression.
   expect(problems, `expected a clean console, saw:\n${problems.join("\n")}`).toEqual([]);
 });
+
+test("the cover backdrop can paint: body stays transparent under the z:-2 pseudo-element", async ({
+  page,
+}) => {
+  // The regression this pins: an opaque body background paints ABOVE a negative
+  // z-index fixed child in the root stacking context, erasing the sitewide cover
+  // backdrop while every rule still "applies" in devtools (2026-07-27; the
+  // Fumadocs preflight's body background won the cascade once #920 scoped
+  // Scalar's sheet away). See the paint contract beside `body::before` in
+  // src/styles.css.
+  await blockExternalRequests(page);
+  await page.goto("/");
+
+  const paint = await page.evaluate(() => ({
+    backdropImage: getComputedStyle(document.body, "::before").backgroundImage,
+    bodyBackground: getComputedStyle(document.body).backgroundColor,
+  }));
+
+  expect(paint.bodyBackground).toBe("rgba(0, 0, 0, 0)");
+  expect(paint.backdropImage).toContain("fluncle-cover-no-text");
+});

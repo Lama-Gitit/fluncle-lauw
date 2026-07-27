@@ -188,6 +188,21 @@ html {
   overscroll-behavior-y: none;
 }
 
+/* THE BACKDROP'S PAINT CONTRACT: body must stay TRANSPARENT. The cover backdrop
+   below is a `z-index: -2` fixed pseudo-element, and in the root stacking context a
+   negative-z child paints ABOVE the canvas but BELOW any opaque in-flow background —
+   so an opaque body background erases the backdrop sitewide. Fumadocs' layered
+   preflight sets `body { background-color: var(--color-fd-background) }` (an opaque
+   Deep Field via the token bridge); for weeks it was accidentally neutralized by
+   Scalar's globally-leaked sheet, and when #920 correctly scoped Scalar to
+   /docs/api the Fumadocs rule won for the first time and the backdrop vanished
+   (2026-07-27). This unlayered rule beats every layered one deterministically; the
+   page's dark ground is html's sleeve-black above, and `tests/e2e/home.spec.ts`
+   pins the contract. */
+body {
+  background-color: transparent;
+}
+
 body::before {
   background:
     var(--grain-tile) repeat,
