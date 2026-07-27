@@ -128,7 +128,12 @@ export const REPORT_ONLY_CSP = [
   "script-src 'self' 'unsafe-inline' https://scripts.simpleanalyticscdn.com",
   "style-src 'self' 'unsafe-inline'",
   "font-src 'self'",
-  "img-src 'self' data: blob: https://found.fluncle.com https://i.scdn.co https://lh3.googleusercontent.com",
+  // img-src: the owned R2 masters + the two raw fallback-cover hosts the DTOs can
+  // serve (Spotify's CDN, and Cover Art Archive for crawler-minted albums with no
+  // owned master yet — crawl.ts stores `coverartarchive.org/release/<id>/front-500`),
+  // Google avatars, and Simple Analytics' image beacon (its script reports via an
+  // <img> GET to queue.*; first watch-window catch, FLUNCLE-WEB-5/6, 2026-07-27).
+  "img-src 'self' data: blob: https://found.fluncle.com https://i.scdn.co https://coverartarchive.org https://lh3.googleusercontent.com https://queue.simpleanalyticscdn.com",
   "media-src 'self' https://found.fluncle.com",
   [
     "connect-src 'self'",
