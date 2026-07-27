@@ -2,6 +2,11 @@
 Description=fluncle-crawl timer — advance the catalogue crawl by one bounded pass every 10m on the rave-02 host (not the Hermes gateway)
 
 [Timer]
+# Per-firing jitter — dissolves timer-phase alignment (2026-07-27: mass timer
+# restarts, e.g. a pin-watch rebake's quiesce/restore, re-align every sweep to fire
+# the same second; the synchronized write bursts convoy on libSQL's single writer).
+# Re-rolled each firing, so no restart can ever re-align the roster.
+RandomizedDelaySec=90
 # First tick shortly after boot (staggered at 7min, off the other sweeps' minutes), then
 # every 10m. The CADENCE is the crawl's real throttle, not the batch size: a crawl is a
 # marathon the schedule finishes, and MusicBrainz's ~1 req/s ceiling means there is no

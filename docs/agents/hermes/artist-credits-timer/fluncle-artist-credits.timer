@@ -2,6 +2,11 @@
 Description=fluncle-artist-credits timer — mint one bounded batch of identity-true artists from MusicBrainz credits every 5m on the rave-02 host (not the Hermes gateway)
 
 [Timer]
+# Per-firing jitter — dissolves timer-phase alignment (2026-07-27: mass timer
+# restarts, e.g. a pin-watch rebake's quiesce/restore, re-align every sweep to fire
+# the same second; the synchronized write bursts convoy on libSQL's single writer).
+# Re-rolled each firing, so no restart can ever re-align the roster.
+RandomizedDelaySec=90
 # First tick shortly after boot (staggered at 4min — mod-5 residue 4, clear of the other 5-min
 # sweeps' minutes: enrich=1, context-note=2, capture=3, embed=3), then every 5m. Each worklist row
 # is one paced ~1.1s MusicBrainz call, so a batch is 40 rows (~under a minute) and the ~14.3k

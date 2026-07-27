@@ -2,6 +2,11 @@
 Description=fluncle-artist-sweep timer — trigger the artist-resolution sweep every 60m on the rave-02 host (not the Hermes gateway)
 
 [Timer]
+# Per-firing jitter — dissolves timer-phase alignment (2026-07-27: mass timer
+# restarts, e.g. a pin-watch rebake's quiesce/restore, re-align every sweep to fire
+# the same second; the synchronized write bursts convoy on libSQL's single writer).
+# Re-rolled each firing, so no restart can ever re-align the roster.
+RandomizedDelaySec=90
 # First tick shortly after boot (staggered at 7min), then every 60m — the artist-sweep cadence
 # (was `every 60m` on the gateway). Persistent catches up a tick missed across a box reboot.
 # Idempotent + bounded batch, so a deferred tick just resolves the next artists on the following

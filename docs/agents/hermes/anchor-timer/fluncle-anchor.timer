@@ -2,6 +2,11 @@
 Description=fluncle-anchor timer — fill catalogue Spotify anchors via Apify, one bounded batch every hour on the rave-02 host (not the Hermes gateway)
 
 [Timer]
+# Per-firing jitter — dissolves timer-phase alignment (2026-07-27: mass timer
+# restarts, e.g. a pin-watch rebake's quiesce/restore, re-align every sweep to fire
+# the same second; the synchronized write bursts convoy on libSQL's single writer).
+# Re-rolled each firing, so no restart can ever re-align the roster.
+RandomizedDelaySec=90
 # First tick shortly after boot (staggered at 11min, off the other sweeps' minutes), then hourly.
 # The CADENCE is the metered-spend throttle: each row is a billed Apify search (~$0.015), so the
 # default 15 rows/hour ≈ 360 rows/day ≈ $5-6/day while the backlog drains — a deliberate, bounded

@@ -2,6 +2,11 @@
 Description=fluncle-publish-advance timer — tick the render → publish auto-advance every 30m on the rave-02 host
 
 [Timer]
+# Per-firing jitter — dissolves timer-phase alignment (2026-07-27: mass timer
+# restarts, e.g. a pin-watch rebake's quiesce/restore, re-align every sweep to fire
+# the same second; the synchronized write bursts convoy on libSQL's single writer).
+# Re-rolled each firing, so no restart can ever re-align the roster.
+RandomizedDelaySec=90
 # First tick shortly after boot (staggered at 9min, off the other sweeps' minutes), then
 # every 30m. The render conductor starts at most one render an hour, so a 30m advance tick
 # always has a fresh finding waiting well before the next render lands — and the Worker's
