@@ -308,6 +308,10 @@ const ADMIN_ROUTE_OPS: Record<string, string> = {
   // rank_catalogue/verify_capture precedent): the box's `fluncle-anchor` Apify sweep POSTs verified
   // candidates and the Worker writes only catalogue-identity columns (never a certification).
   "POST /admin/catalogue/anchor": "anchor_track",
+  // The anchor-backoff requeue — operator tier (the same re-arms-metered-spend class as the
+  // capture requeue below): clear named rows' 14-day re-ask stamp after a resolver improvement,
+  // leaving the lifetime attempts cap untouched.
+  "POST /admin/catalogue/anchor/requeue": "requeue_anchor",
   // The FREE first rung of the resolver waterfall (slice 1) — contract-only oRPC (no TanStack route
   // file). AGENT tier (the anchor_track precedent): the box's `fluncle-anchor` sweep calls it first
   // per row (server resolves ListenBrainz → Spotify by-id, verifies, writes) and spends Apify only on

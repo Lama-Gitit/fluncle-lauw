@@ -161,6 +161,16 @@ export async function requeueUnmatchedCommand(): Promise<{
   );
 }
 
+// Thin client over the operator-tier `requeue_anchor` op: clear the named rows' anchor
+// re-ask stamp so the next sweep tick retries them now instead of after the 14-day backoff
+// (the resolver-just-got-better lever). Clears only the stamp — the lifetime attempts cap
+// stays honest — and anchored rows are skipped server-side.
+export async function requeueAnchorCommand(trackIds: string[]): Promise<{ requeued: number }> {
+  return adminApiPost<{ ok: true; requeued: number }>("/api/v1/admin/catalogue/anchor/requeue", {
+    trackIds,
+  });
+}
+
 /**
  * Overrule the duplicate veto on one catalogue row so it can be captured (operator). `fluncle
  * admin catalogue force-capture <trackId>` — the dupe-veto escape hatch (docs/the-ear.md §

@@ -2265,6 +2265,28 @@ function addAdminCommands(program: Command): void {
       );
     });
 
+  // `requeue_anchor` → `admin catalogue requeue-anchor <trackId...>` (operator). Clear the named
+  // rows' anchor re-ask backoff so the next `fluncle-anchor` tick retries them now — the lever
+  // for "the resolver just got better" (a matcher fix, a recovered ISRC, a reviewed candidate).
+  catalogue
+    .command("requeue-anchor")
+    .description("Clear rows' anchor re-ask backoff so the next tick retries them (operator)")
+    .argument("<trackIds...>", "The catalogue track id(s) to requeue (up to 250)")
+    .option("--json", "Print JSON", false)
+    .action(async (trackIds: string[], options: JsonOptions) => {
+      const { requeueAnchorCommand } = await import("./commands/admin-catalogue");
+      const { requeued } = await requeueAnchorCommand(trackIds);
+
+      if (options.json) {
+        printJson({ ok: true, requeued });
+        return;
+      }
+
+      console.log(
+        `Re-queued ${requeued} of ${trackIds.length} row(s) — the next anchor tick picks them up at their real priority.`,
+      );
+    });
+
   catalogue
     .command("requeue-unmatched")
     .description("Re-queue terminal-unmatched captures after a matcher improvement (operator)")

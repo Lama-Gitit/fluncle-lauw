@@ -628,6 +628,7 @@ const EXPECTED_TIERS: Record<string, "admin" | "operator" | "private-session"> =
   // The terminal-unmatched rescue — operator tier: it re-arms metered capture spend across
   // hundreds of rows in one act, the `set_capture_budget` money-judgement class. It fires
   // after a MATCHER improvement (a human deploy decision), never on a sweep's own schedule.
+  requeue_anchor: "operator",
   requeue_unmatched_captures: "operator",
   // Clears a LIVE published video (video_url + video_squared_at) to re-queue a
   // re-render — operator-only (adminAuth + operatorGuard); the box agent never

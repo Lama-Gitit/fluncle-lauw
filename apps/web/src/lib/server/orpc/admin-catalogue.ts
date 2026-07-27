@@ -38,6 +38,7 @@ import {
   type AnchorCandidate,
   anchorTrack,
   AnchorTrackError,
+  requeueAnchorStamps,
   resolveAnchorFree,
   resolveAnchorReview,
 } from "../anchor";
@@ -212,6 +213,22 @@ export function adminCatalogueHandlers(os: Implementer) {
     .handler(async () => {
       try {
         return { ...(await requeueUnmatchedCaptures()), ok: true as const };
+      } catch (error) {
+        throw apiFault(error);
+      }
+    });
+
+  // POST /admin/catalogue/anchor/requeue — OPERATOR tier. Clear the named rows' anchor re-ask
+  // stamp so the next `fluncle-anchor` tick retries them now instead of after the 14-day
+  // backoff (the resolver-just-got-better lever). Clears ONLY the stamp — the lifetime attempts
+  // cap stays honest — and skips anchored rows. Operator-only: each requeued row can re-arm
+  // metered Apify spend. Idempotent.
+  const requeueAnchorHandler = os.requeue_anchor
+    .use(adminAuth)
+    .use(operatorGuard)
+    .handler(async ({ input }) => {
+      try {
+        return { ok: true as const, requeued: await requeueAnchorStamps(input.trackIds) };
       } catch (error) {
         throw apiFault(error);
       }
@@ -537,6 +554,7 @@ export function adminCatalogueHandlers(os: Implementer) {
     list_unverified_captures: listUnverifiedCapturesHandler,
     rank_catalogue: rankCatalogueHandler,
     record_demand: recordDemandHandler,
+    requeue_anchor: requeueAnchorHandler,
     requeue_unmatched_captures: requeueUnmatchedCapturesHandler,
     reset_apple_breaker: resetAppleBreakerHandler,
     resolve_anchor: resolveAnchorHandler,

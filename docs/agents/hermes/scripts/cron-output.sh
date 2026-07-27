@@ -34,6 +34,28 @@
 # markers; re-emits the captured stdout for journald; and PRESERVES the command's exit code
 # (so a real failure still fails the systemd unit).
 
+# ── THE REBAKE GUARD (runs at source time, before any sweep work) ──────────────
+# A pin-watch rebuild+swap TERMs every in-flight `docker exec` when the container swaps —
+# measured twice as an exit-143 sweep killed mid-tick (2026-07-26 12:27, 2026-07-27 04:34),
+# both MANUALLY-started sweeps: the rebuild's quiesce stops the TIMERS, but nothing stops a
+# `systemctl start fluncle-<job>.service` from walking into the build/swap window, and a
+# look-before-you-start check just races the swap. So the rebuild holds a lock file in the
+# /opt/data mount (rebuild-hermes.sh, quiesce_sweeps) and every sweep — sourced through this
+# helper — SKIPS the tick cleanly while it is held. Sweeps are resumable by design, so a
+# skipped tick costs one cadence, not data. STALENESS ESCAPE: a rebuild hard-killed past the
+# EXIT trap could strand the lock; a lock older than 45 min (a rebuild runs ~10–20) is
+# ignored and cleared, so the roster can never be wedged by a dead rebake.
+_REBAKE_LOCK="$(dirname -- "${HOME:-/opt/data/home}")/rebake.lock"
+if [ -f "$_REBAKE_LOCK" ]; then
+  if [ -n "$(find "$_REBAKE_LOCK" -mmin +45 2>/dev/null)" ]; then
+    echo "stale rebake lock (>45 min) at ${_REBAKE_LOCK} — clearing and proceeding" >&2
+    rm -f "$_REBAKE_LOCK" 2>/dev/null || true
+  else
+    echo "rebake in progress (${_REBAKE_LOCK}) — skipping this tick; the next schedule reruns it"
+    exit 0
+  fi
+fi
+
 # The prober computes the output dir as dirname(HOME)/cron/output (HOME=/opt/data/home ->
 # /opt/data/cron/output). Mirror that exactly; HEALTHCHECK_CRON_OUTPUT_DIR overrides it for a
 # local dry-run, matching the prober's own override of the same name.

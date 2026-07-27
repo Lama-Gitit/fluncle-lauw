@@ -149,11 +149,25 @@ fi
 # drain any sweep already mid-run, and GUARANTEE a restart via the EXIT trap.
 STOPPED_TIMERS=()
 
+# The rebake LOCK — the half of the quiesce that covers what stopping timers cannot: a
+# MANUAL `systemctl start fluncle-<job>.service` walking into the build/swap window. The
+# container swap TERMs every in-flight `docker exec` (measured twice: exit 143 mid-tick,
+# 2026-07-26 12:27 and 2026-07-27 04:34 — both manually-triggered sweeps; a pre-check
+# races the swap, so the sweep itself must see the window). Written into the /opt/data
+# mount so the BAKED sweeps can read it (cron-output.sh skips the tick when it is
+# present, with a >45-min staleness escape so a hard-killed rebuild can never wedge the
+# roster). Removed in restore_sweep_timers, which the EXIT trap already guarantees.
+REBAKE_LOCK=""
+
 # Restart EXACTLY the timers we stopped, best-effort so one failing start never strands
 # the rest. Runs from the EXIT trap, so it fires on success, on die(), on a build/smoke
 # failure, AND on the rollback path — a failed rebuild must never leave sweeps disabled.
 # shellcheck disable=SC2329  # invoked indirectly from the EXIT trap set in quiesce_sweeps
 restore_sweep_timers() {
+  if [ -n "$REBAKE_LOCK" ]; then
+    rm -f "$REBAKE_LOCK" 2>/dev/null || true
+    REBAKE_LOCK=""
+  fi
   [ "${#STOPPED_TIMERS[@]}" -gt 0 ] || return 0
   local t
   for t in "${STOPPED_TIMERS[@]}"; do
@@ -182,6 +196,17 @@ quiesce_sweeps() {
   # Arm the restart guard BEFORE stopping anything (compose with the ENVTMP cleanup
   # trap set in step 3), so every exit path from here restores the timers.
   trap 'restore_sweep_timers; rm -f "$ENVTMP"' EXIT
+
+  # Drop the rebake lock into the live container's /opt/data mount (resolved from the
+  # container, never assumed — the script runs as root, `~` would be /root). Best-effort:
+  # a missing mount just means no lock, which is today's behavior, not a failure.
+  local lock_src
+  lock_src="$(docker inspect "$CONTAINER" --format '{{range .Mounts}}{{if eq .Destination "/opt/data"}}{{.Source}}{{end}}{{end}}' 2>/dev/null || true)"
+  if [ -n "$lock_src" ] && [ -d "$lock_src" ]; then
+    REBAKE_LOCK="${lock_src}/rebake.lock"
+    date -u +%FT%TZ > "$REBAKE_LOCK" 2>/dev/null || REBAKE_LOCK=""
+    [ -n "$REBAKE_LOCK" ] && log "rebake lock held: $REBAKE_LOCK"
+  fi
 
   for t in "${STOPPED_TIMERS[@]}"; do
     systemctl stop "$t" >/dev/null 2>&1 || true

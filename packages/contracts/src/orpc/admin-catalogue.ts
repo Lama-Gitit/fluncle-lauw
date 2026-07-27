@@ -392,6 +392,31 @@ export const requeueUnmatchedCaptures = oc
   .output(z.object({ ok: z.literal(true), requeued: z.number(), skippedVetoed: z.number() }));
 
 /**
+ * `requeue_anchor` → `POST /admin/catalogue/anchor/requeue` (operationId `requeueAnchor`).
+ *
+ * OPERATOR tier — clear the named rows' `spotify_anchor_attempted_at` re-ask stamp so the next
+ * `fluncle-anchor` tick attempts them again NOW instead of after the 14-day backoff. The
+ * operator's lever for "the resolver just got better, give these rows their shot" — a matcher
+ * fix, a recovered ISRC, a freshly-reviewed candidate (three separate ad-hoc prod UPDATEs did
+ * exactly this on 2026-07-26/27; this op is that act made sanctioned, audited, and one line).
+ *
+ * Deliberately narrow: it clears ONLY the stamp — `spotify_anchor_attempts` (the lifetime cap,
+ * #893) stays honest, so a requeue never resets a row's bounded spend; already-anchored rows are
+ * skipped by the WHERE. Operator-only for the same reason as `requeue_unmatched_captures`: each
+ * requeued row can re-arm metered Apify spend. Idempotent — a second call affects zero rows.
+ */
+export const requeueAnchor = oc
+  .route({
+    method: "POST",
+    operationId: "requeueAnchor",
+    path: "/admin/catalogue/anchor/requeue",
+    summary: "Clear named rows' anchor re-ask backoff so the next tick retries them (operator)",
+    tags: ["Admin"],
+  })
+  .input(z.object({ trackIds: z.array(z.string().min(1)).min(1).max(250) }))
+  .output(z.object({ ok: z.literal(true), requeued: z.number() }));
+
+/**
  * `flag_wrong_audio` → `POST /admin/catalogue/wrong-audio/flag` (operationId `flagWrongAudio`).
  *
  * OPERATOR tier — `clear_wrong_audio`'s counterpart: "the FINDING's capture is the wrong one"
@@ -1112,6 +1137,7 @@ export const adminCatalogueContract = {
   list_unverified_captures: listUnverifiedCaptures,
   rank_catalogue: rankCatalogue,
   record_demand: recordDemand,
+  requeue_anchor: requeueAnchor,
   requeue_unmatched_captures: requeueUnmatchedCaptures,
   reset_apple_breaker: resetAppleBreaker,
   resolve_anchor: resolveAnchor,

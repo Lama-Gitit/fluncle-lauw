@@ -859,6 +859,34 @@ async function stampAnchorAttempt(
 }
 
 /**
+ * THE OPERATOR REQUEUE (`requeue_anchor`) — clear the named rows' re-ask stamp so the next sweep
+ * tick attempts them again NOW rather than after `ANCHOR_REASK_AFTER_DAYS`. The lever for "the
+ * resolver just got better, give these rows their shot": a matcher fix, a recovered ISRC, a
+ * reviewed candidate. Deliberately clears ONLY the stamp — `spotify_anchor_attempts` (the lifetime
+ * cap) stays honest, so a requeue re-times a row's next try without re-arming its bounded spend —
+ * and only un-anchored rows qualify (`spotify_uri is null`). Idempotent: already-clear rows and
+ * anchored rows count zero. Returns the number of rows actually re-queued.
+ */
+export async function requeueAnchorStamps(trackIds: string[]): Promise<number> {
+  if (trackIds.length === 0) {
+    return 0;
+  }
+
+  const db = await getDb();
+  const placeholders = trackIds.map(() => "?").join(", ");
+  const result = await db.execute({
+    args: trackIds,
+    sql: `update tracks
+          set spotify_anchor_attempted_at = null
+          where track_id in (${placeholders})
+            and spotify_uri is null
+            and spotify_anchor_attempted_at is not null`,
+  });
+
+  return result.rowsAffected;
+}
+
+/**
  * THE FREE (non-Apify) RESOLVER RUNGS of the waterfall — try to anchor a catalogue row without any
  * Apify money (docs/catalogue-crawler.md § the anchor). The box's sweep calls this FIRST per row and
  * spends the metered Apify search only when it MISSES.

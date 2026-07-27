@@ -325,6 +325,46 @@ describe("anchorTrack — the rails", () => {
   });
 });
 
+describe("requeueAnchorStamps — the operator requeue", () => {
+  it("clears the stamp but NEVER the attempts cap, and only on un-anchored stamped rows", async () => {
+    const { requeueAnchorStamps } = await import("./anchor");
+
+    // A stamped, capped-progress row: eligible — stamp clears, attempts stay.
+    await seedUnanchored({ trackId: "mb_rq_eligible" });
+    await db.execute(
+      `update tracks set spotify_anchor_attempted_at = '2026-07-26T12:00:00.000Z',
+        spotify_anchor_attempts = 3 where track_id = 'mb_rq_eligible'`,
+    );
+    // An anchored row: skipped even when named.
+    await seedUnanchored({ trackId: "mb_rq_anchored" });
+    await db.execute(
+      `update tracks set spotify_uri = 'spotify:track:done',
+        spotify_anchor_attempted_at = '2026-07-26T12:00:00.000Z' where track_id = 'mb_rq_anchored'`,
+    );
+    // A never-stamped row: nothing to clear, counts zero.
+    await seedUnanchored({ trackId: "mb_rq_fresh" });
+
+    const requeued = await requeueAnchorStamps(["mb_rq_eligible", "mb_rq_anchored", "mb_rq_fresh"]);
+    expect(requeued).toBe(1);
+
+    const row = await db.execute(
+      "select spotify_anchor_attempted_at as at, spotify_anchor_attempts as n from tracks where track_id = 'mb_rq_eligible'",
+    );
+    expect(row.rows[0]?.at).toBeNull();
+    expect(Number(row.rows[0]?.n)).toBe(3);
+
+    const anchored = await db.execute(
+      "select spotify_anchor_attempted_at as at from tracks where track_id = 'mb_rq_anchored'",
+    );
+    expect(anchored.rows[0]?.at).not.toBeNull();
+
+    // Idempotent: a second call finds nothing left to clear.
+    expect(await requeueAnchorStamps(["mb_rq_eligible", "mb_rq_anchored", "mb_rq_fresh"])).toBe(0);
+    // And an empty list is a zero-write no-op.
+    expect(await requeueAnchorStamps([])).toBe(0);
+  });
+});
+
 describe("the anchor worklist (track-work.ts kind: anchor)", () => {
   it("orders embedded rows first, then nearest_finding_score DESC, then track_id", async () => {
     const { listTrackWork } = await import("./track-work");
