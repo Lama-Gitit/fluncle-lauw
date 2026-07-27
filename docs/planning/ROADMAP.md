@@ -37,13 +37,9 @@ The add → live pipeline is operational end to end — the one `/admin` cockpit
 
 ### Operator activations — the flips that cost one session
 
-Each of these is a repo half already shipped and a box/console half withheld. None needs a deploy.
+One flip remains (ruled to wait); the 2026-07-27 activation session cleared the rest — the bio/logbook/triage sweeps turned out to be already enabled and ticking on the box, Twitch is connected and collecting, the hardened DNS binary is live on the dig host, and the post-deploy edge-cache purge fired for the first time with the build-env token in place.
 
-- [ ] **Publish-advance: resume it and watch one finding land.** `fluncle admin publish resume` (or the toggle on `/admin/findings`). The repo half and the host-timer unit are committed (`docs/agents/hermes/publish-advance-timer/`) and the kill switch is **default-deny** — an absent setting reads as paused, so nothing posts until the flip. Doctrine: [docs/track-lifecycle.md](../track-lifecycle.md) § _The render → publish auto-advance_.
-- [ ] **Enable the three dark sweeps on rave-02.** The artist-bio + label-bio, logbook, and triage timers are baked in the repo (`artist-bio-timer`, `label-bio-timer`, `logbook-timer`, `triage-timer`) with box activation deliberately operator-gated; the repo halves are done, so this is one session for four units.
-- [ ] **Connect Twitch for /reach Tier-2.** The last unlit leg — the plumbing is live (optional env, Worker-side `twitch_auth` token, origin-derived redirect); what is missing is the operator granting **as the broadcaster** and registering the callback in the Twitch console. Runbook + verify command: [docs/reach-tier2-activation.md](../reach-tier2-activation.md).
-- [ ] **Redeploy the DNS binary to the dig host.** An operational activation carried out of the 2026-07-26 sweep — the hardened `apps/dns` build needs to reach the host that answers `dig`.
-- [ ] **Add `CF_CACHE_PURGE_TOKEN` to the Cloudflare build environment.** `deploy:cf` now ends with a post-deploy edge-cache purge (`apps/web/scripts/purge-edge-cache.ts`) so a deploy can never again strand cached HTML pointing at retired asset hashes (the 2026-07-26 unstyled-page window) — but the token is a Worker runtime secret the build shell cannot see, so until it is added to the build env the purge skips loudly and the old TTL window applies.
+- [ ] **Publish-advance: resume it and watch one finding land** _(ruled 2026-07-27: stays dark for now — flip when ready)_. `fluncle admin publish resume` (or the toggle on `/admin/findings`). The repo half and the host-timer unit are committed (`docs/agents/hermes/publish-advance-timer/`) and the kill switch is **default-deny** — an absent setting reads as paused, so nothing posts until the flip. Doctrine: [docs/track-lifecycle.md](../track-lifecycle.md) § _The render → publish auto-advance_.
 
 ### The autonomy ladder — two manual beats left
 
@@ -72,18 +68,12 @@ Dependabot reports **1 critical, 6 high, 8 medium, 3 low** open against the repo
 
 ### Housekeeping follow-ups — operator decisions pending (2026-07-26 sweep)
 
-The 19-PR housekeeping sweep left a queue of calls the code cannot settle. Each is small; the point of listing them together is that they are one operator sitting.
+The 2026-07-27 rulings session settled most of the sweep's queue (HSTS posture kept, branch protection gained the required gitleaks check, fontWeight 800 ratified, the ports rule amended, `update_mixtape_cue` retired, the cover PNGs stay uncommitted, the "sync" gloss deliberately unruled, the OAuth handoff shipped). What is still open:
 
 - [ ] **CSP graduation.** `security-headers.ts` ships an enforcing `frame-ancestors 'self'` plus a full `Content-Security-Policy-Report-Only` policy. The **report sink is wired** — violations POST to Sentry's Security feed (`report-uri` + `report-to`/`Reporting-Endpoints`, public https origins only; see [docs/error-tracking.md](../error-tracking.md)). What remains is the operator's: watch that feed across a real traffic window, separate extension noise from a genuine first-party subresource, then flip.
-- [ ] **HSTS `includeSubDomains` / `preload`.** Both are deliberately excluded today (one year, no preload, no subdomains — the conservative reading, and `preload` is a one-way door). Confirm or change the reading.
-- [ ] **The dependency-hygiene bundle:** `bun audit` in CI, the Renovate npm extension, the deepsec bump, and the three Dependabot dismissals.
-- [ ] **Branch protection:** the required-checks set and `enforce_admins`. Repo security settings are the operator's to toggle.
-- [ ] **The "sync" device-link gloss.** Ratify the word, then it is canon everywhere it appears.
-- [ ] **DESIGN.md `fontWeight` 700 vs the tokens' 800.** The canon doc and the tokens disagree; one of them is wrong.
-- [ ] **The hetzner-devbox skill's committed ports.** The skill commits a concrete SSH port. Rule on whether that is topology (and belongs in the private companion) or acceptable public detail — and amend either the skill or the rule, never leave the contradiction.
-- [ ] **The three mixtape-cover PNGs' committed home.** Decide where they live, or that they are generated rather than committed.
+- [ ] **The dependency-hygiene remainder:** `bun audit --audit-level=high` as a CI job and the Renovate npm/bun extension — the two moves that close the `bun.lock` blind spot (the deepsec bump shipped 2026-07-27; the three Dependabot dismissals are queued operator clicks).
 
-The DNS binary redeploy from the same sweep is an activation rather than a ruling and sits with the other flips under _Now → Operator activations_. The sonar release gate is a build and lives under _The enforcement gates_ below.
+The sonar release gate is a build and lives under _The enforcement gates_ below.
 
 ### The enforcement gates — three holes at the deploy boundary
 
@@ -93,11 +83,10 @@ The build-fail coverage tests and `deploy:gate` are how this repo keeps architec
 - **Rule on the `/api/v1` ↔ `/api` dual-mount.** `routes/api/-alias.ts` documents the contract (versioned path, bare path as back-compat alias, the same object re-mounted) but six file-routes are reachable only at the legacy path (`api/admin/chat.ts`, `api/og.set.ts`, and the Instagram + Twitch auth start/callback pairs). Mirror them or declare them deliberately unversioned — then pin the ruling with a test. Ledger row: `docs/audit-backlog.md` (architecture, 2026-07-26).
 - **Gate the sonar release.** `.github/workflows/sonar-release.yml` builds and publishes the rolling pre-release with no `cargo test`, no `clippy`, no `fmt --check`, and the box self-swaps off that release — so a merge to `apps/sonar/**` reaches the live engine ungated. This is the `deploy:gate` principle applied to the one deploy path that escapes it.
 
-### Sonar — commission the last unbounded vector scan
+### Sonar — fully commissioned; replication stays a tripwire
 
-The vector-serving stack is live: every "sounds like" question runs as an exact in-memory SIMD scan in `apps/sonar` ([docs/vector-serving.md](../vector-serving.md)). One route is merged but **not commissioned**.
+The vector-serving stack is live and, as of 2026-07-27, fully commissioned: all six per-surface flags are on (the `/recommendations` catalogue scan was the last — flipped after the `GET /health` pre-flight against the caps build), so every "sounds like" question runs as an exact in-memory SIMD scan in `apps/sonar` and the database's vector fold is pure fallback ([docs/vector-serving.md](../vector-serving.md)).
 
-- **`/recommendations` on sonar.** The filter fields exist and the equivalence is proven; the remaining work is operator-ordered: let the box self-deploy, read `commit` off `GET /health`, flip `sonar_recs_catalogue_enabled`, then check the page against the measured 9,859-rows / ~1.84s baseline. **Until that flip, the last unbounded vector scan is still running in the database.**
 - **Regional replication stays a tripwire, not a task.** One region today. A second is only correct once far-region _dynamic_ (uncached search / recs) traffic is a measured, meaningful share — and the Worker→engine hop must stay same-continent or the win is eaten. When the number appears, spin a box and register it; not before.
 
 ### DB scale — the Wave-2 remainder and the index economics
