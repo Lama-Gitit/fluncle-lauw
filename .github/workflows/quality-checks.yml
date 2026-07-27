@@ -30,6 +30,21 @@ jobs:
           persist-credentials: false
           ref: ${{ inputs.checkout-ref || github.sha }}
 
+      # Migrations are APPEND-ONLY: a merge must never delete a migration file that exists on
+      # main. This is the parallel-migration collision guard — a PR generated when main held
+      # migration N, merged after another session landed a different N, silently clobbers that
+      # migration (the JSON journal auto-merges without conflict; it happened live 2026-07-27
+      # and main had to be reset). A red check here is what prose could not be.
+      - name: Migrations are append-only
+        run: |
+          git fetch --depth=1 origin main
+          deleted="$(git diff --diff-filter=D --name-only origin/main...HEAD -- apps/web/drizzle/)"
+          if [ -n "$deleted" ]; then
+            echo "::error::This branch DELETES migration files that exist on main — a parallel-migration collision. Rebase onto main, drop your drizzle artifacts, and re-run db:generate so your migration takes the next free number."
+            echo "$deleted"
+            exit 1
+          fi
+
       - name: Setup Bun
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
         with:
