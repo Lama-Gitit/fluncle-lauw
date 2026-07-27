@@ -37,7 +37,20 @@ jobs:
       # and main had to be reset). A red check here is what prose could not be.
       - name: Migrations are append-only
         run: |
-          git fetch --depth=1 origin main
+          # The triple-dot diff needs a MERGE BASE, which two depth-1 histories cannot
+          # contain — a stale branch (every overnight Renovate branch) then dies with
+          # "no merge base" instead of being checked. Fetch main fully and deepen the
+          # shallow PR-side history until the fork point is reachable.
+          git fetch origin main
+          tries=0
+          until git merge-base origin/main HEAD >/dev/null 2>&1; do
+            tries=$((tries + 1))
+            if [ "$tries" -gt 20 ]; then
+              echo "::error::Could not reach a merge base with origin/main after deepening — fetch the branch history manually."
+              exit 1
+            fi
+            git fetch --deepen=200 origin || break
+          done
           deleted="$(git diff --diff-filter=D --name-only origin/main...HEAD -- apps/web/drizzle/)"
           if [ -n "$deleted" ]; then
             echo "::error::This branch DELETES migration files that exist on main — a parallel-migration collision. Rebase onto main, drop your drizzle artifacts, and re-run db:generate so your migration takes the next free number."
