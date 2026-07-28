@@ -9,7 +9,7 @@ version = "0.1.0"
 edition = "2021"
 rust-version = "1.82"
 description = "In-memory exact vector-similarity engine for Fluncle's live discovery surfaces"
-license = "MIT"
+license = "Apache-2.0"
 
 [lib]
 name = "sonar"

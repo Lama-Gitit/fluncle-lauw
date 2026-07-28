@@ -86,11 +86,25 @@ export default {
       },
 
       // admin board: 15 independent per-dialog state slices (not one cohesive
-      // group), and `subheader` JSX-as-prop into a non-memo'd AdminShell costs
-      // nothing — both are the rules' documented FP shapes.
+      // group), `subheader` JSX-as-prop into a non-memo'd AdminShell costs
+      // nothing, and the IntersectionObserver infinite-scroll effect calls
+      // react-query's stable `fetchNextPage()` action (the route root has no
+      // parent to lift state to) — all three are the rules' documented FP shapes.
       {
         files: ["src/routes/admin/index.tsx"],
-        rules: ["react-doctor/prefer-useReducer", "react-doctor/jsx-no-jsx-as-prop"],
+        rules: [
+          "react-doctor/prefer-useReducer",
+          "react-doctor/jsx-no-jsx-as-prop",
+          "react-doctor/no-pass-live-state-to-parent",
+        ],
+      },
+
+      // The idiomatic clear-pending-timeout-on-unmount effect: reading
+      // `ref.current` at unmount is intended (clear whichever timeout is latest),
+      // and the timeout is set in `copyText`, not the effect — nothing to capture.
+      {
+        files: ["src/components/copy-button.tsx"],
+        rules: ["react-doctor/exhaustive-deps"],
       },
 
       // Full-page navigations that must escape client routing: the Spotify OAuth

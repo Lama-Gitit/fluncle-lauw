@@ -31,10 +31,12 @@ export default {
         rules: ["react-doctor/unused-file", "react-doctor/unused-export"],
       },
       // setError reports a real WebGL/bloom setup failure from the imperative GPU
-      // draw effect — there's no duplicated/derived state to remove.
+      // draw effect — there's no duplicated/derived state to remove. And the
+      // per-frame render effect re-runs on every `frame` dep tick, so the closure
+      // refreshes each frame and omitting `ensureBundle` can never go stale.
       {
         files: ["src/remotion/journey/shader-layer.tsx"],
-        rules: ["react-doctor/no-adjust-state-on-prop-change"],
+        rules: ["react-doctor/no-adjust-state-on-prop-change", "react-doctor/exhaustive-deps"],
       },
       // `[...clean].sort(bySaturation)[0]` is an argmax (the element with max
       // saturation), which Math.max can't express — the rule's documented FP.

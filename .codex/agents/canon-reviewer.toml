@@ -21,7 +21,7 @@ Also relevant: the `copywriting-fluncle` skill for voice specifics.
 **Visual / design system**
 
 - Public app stays **dark-only, cover-led, centered, quiet, fast**. Flag SaaS-dashboard looks, bright streaming-app clones, generic marketing hero sections, glassy card stacks, and decorative gradients that ignore the cover art.
-- Shared UI uses Shadcn components from `apps/web/src/components/ui/` by their **canonical generated exports** — no local aliases/wrappers when an exact Shadcn component exists. **Never** import headless primitives (`@base-ui/react/*`) directly in feature code. If a needed Shadcn component is absent, the fix is to add it via the Shadcn CLI, not hand-roll a primitive.
+- Shared UI uses Shadcn components from the shared `packages/ui` package (imported as `@fluncle/ui/components/<name>`; there is no per-app `ui/` directory, and the Shadcn CLI runs from `packages/ui`, whose `components.json` owns the aliases) by their **canonical generated exports** — no local aliases/wrappers when an exact Shadcn component exists. **Never** import headless primitives (`@base-ui/react/*`) directly in feature code. If a needed Shadcn component is absent, the fix is to add it via the Shadcn CLI, not hand-roll a primitive.
 - **Iconography:** interface icons from **Phosphor**; third-party brand/platform logos (Spotify, YouTube, TikTok…) from **simple-icons** via `BrandIcon` / `@/components/platform-icons`. A Phosphor logo glyph used as a brand mark is a finding.
 
 **Accessibility**
