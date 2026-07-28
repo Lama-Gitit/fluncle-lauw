@@ -2,17 +2,75 @@
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
   "extends": ["config:recommended", "helpers:pinGitHubActionDigests"],
   "enabledManagers": ["github-actions"],
-  "github-actions": {
-    "pinDigests": true
-  },
   "labels": ["dependencies", "github-actions"],
+  "timezone": "Europe/Amsterdam",
   "schedule": ["before 6am on monday"],
-  "prConcurrentLimit": 3,
+  "prConcurrentLimit": 1,
+  "automerge": false,
+  "minimumReleaseAge": "3 days",
+  "minimumReleaseAgeBehaviour": "timestamp-required",
   "packageRules": [
     {
-      "description": "Same-major action digest refreshes ship hands-off; a new major waits for approval on the dependency dashboard.",
+      "description": "One PR per window, one deploy: every merge to main is a production deploy (Workers Builds), and rapid merges coalesce builds — so a Monday's action-digest drift lands as a single grouped PR, opened for review (never automerged by Renovate; renovate.json holds no automerge). New majors wait for approval on the dependency dashboard.",
+      "matchManagers": ["github-actions"],
+      "groupName": "github actions"
+    },
+    {
+      "description": "dtolnay/rust-toolchain is pinned to a branch tip (stable), not a semver tag — Renovate can only offer digest updates for it, which would bypass the major gate below. Every refresh of an arbitrary branch tip is an operator decision.",
+      "matchDepNames": ["dtolnay/rust-toolchain"],
+      "dependencyDashboardApproval": true
+    },
+    {
+      "description": "Same-major action digest refreshes ride the grouped PR; a new major waits for approval on the dependency dashboard.",
       "matchManagers": ["github-actions"],
       "matchUpdateTypes": ["major"],
+      "dependencyDashboardApproval": true
+    },
+    {
+      "description": "HELD (inert until the npm/bun manager is enabled — encoded now so the config is already correct that day): eslint majors in apps/mobile — eslint-config-expo's plugin chain crashes under ESLint 10; rides the Expo SDK arc.",
+      "matchFileNames": ["apps/mobile/package.json"],
+      "matchPackageNames": ["eslint"],
+      "matchUpdateTypes": ["major"],
+      "enabled": false
+    },
+    {
+      "description": "HELD: tailwindcss stays v3 in apps/mobile — NativeWind 4.x is built for Tailwind 3; its loose peer range lies. Never bump until NativeWind ships Tailwind 4 support.",
+      "matchFileNames": ["apps/mobile/package.json"],
+      "matchPackageNames": ["tailwindcss"],
+      "matchUpdateTypes": ["major"],
+      "enabled": false
+    },
+    {
+      "description": "HELD: Expo-pinned native deps route through the Expo SDK bump only (bundledNativeModules.json is the authority, not the packages' own peer ranges).",
+      "matchFileNames": ["apps/mobile/package.json"],
+      "matchPackageNames": [
+        "react-native",
+        "react-native-gesture-handler",
+        "react-native-safe-area-context",
+        "expo",
+        "expo-*"
+      ],
+      "enabled": false
+    },
+    {
+      "description": "HELD: @resvg/resvg-wasm pinned ~2.4.0 to match the copy workers-og bundles — a newer copy adds ~1 MB of Worker wasm for zero gain.",
+      "matchPackageNames": ["@resvg/resvg-wasm"],
+      "enabled": false
+    },
+    {
+      "description": "HELD: @ai-sdk/react pinned exact 4.0.20 (ChatDnB generative-UI run).",
+      "matchPackageNames": ["@ai-sdk/react"],
+      "enabled": false
+    },
+    {
+      "description": "HELD: drizzle-orm 1.0 RC is peer-blocked by better-auth (^0.45.2); take it when better-auth follows.",
+      "matchPackageNames": ["drizzle-orm", "drizzle-kit"],
+      "matchUpdateTypes": ["major"],
+      "enabled": false
+    },
+    {
+      "description": "GUARD: @remotion/bundler is patched via patchedDependencies, keyed by EXACT version — any bump must re-key patches/@remotion%2Fbundler@*.patch in the same PR (scripts/patched-dependencies.test.ts turns a detached patch into a red deploy gate). Surface it on the dashboard instead of auto-PRing.",
+      "matchPackageNames": ["@remotion/bundler"],
       "dependencyDashboardApproval": true
     }
   ]
