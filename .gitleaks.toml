@@ -6,15 +6,15 @@
 # This catches accidentally-committed SECRET VALUES (tokens, keys) via the default
 # ruleset over the FULL git history. op:// 1Password PATH hygiene is a separate concern
 # (references, not secrets — and history can't be un-leaked), handled by the working-tree
-# grep step in .github/workflows/gitleaks.yml + AGENTS.md "Public Repo"; concrete vault/
-# item names live behind the private Ops Runbook note in 1Password.
+# grep step in .github/workflows/gitleaks.yml + AGENTS.md "Public Repo"; the concrete
+# vault/item map lives in the private companion repo (AGENTS.md "Private companion").
 title = "Fluncle gitleaks config"
 
 [extend]
 useDefault = true
 
-[allowlist]
-description = "Intentionally-public identifiers (runtime config, not secrets) + non-source paths"
+[[allowlists]]
+description = "Intentionally-public identifiers (runtime config, not secrets)"
 regexTarget = "match"
 regexes = [
   # The Cloudflare R2 account id is a runtime Worker binding (wrangler.jsonc) — a
@@ -42,11 +42,6 @@ regexes = [
   # the `...+xml` / `...+json` media types.
   '''application/(rss|atom)\+xml''',
   '''application/feed\+json''',
-  # The mobile app's AsyncStorage key names (`STORAGE_KEY = "fluncle.<store>.v1"`) — local
-  # storage namespaces, not credentials. The `KEY` keyword plus the dotted name sits right
-  # at generic-api-key's 3.5 entropy floor: "fluncle.saved.v1" scrapes under, "fluncle.mix.v1"
-  # lands a hair over and reddened CI. Allowlist the whole family so the next store doesn't.
-  '''fluncle\.[a-z0-9.-]+\.v\d+''',
 ]
 # Only DERIVED trees are excluded — build output, vendored deps, lockfiles. Anything
 # hand-written is scanned, including `.claude/` and `.agents/` (agent defs, hooks, and
@@ -54,6 +49,8 @@ regexes = [
 # procedures, which is exactly where a pasted token would land). They were excluded
 # wholesale until this pass; the tree and the full history both scan clean without the
 # exclusion, so there is nothing to trade for the coverage.
+[[allowlists]]
+description = "Derived trees — build output, vendored deps, lockfiles"
 paths = [
   '''(^|/)node_modules/''',
   '''(^|/)\.dev/''',
@@ -61,6 +58,17 @@ paths = [
   '''(^|/)\.output/''',
   '''(^|/)\.source/''',
   '''(^|/)bun\.lock$''',
-  # generated Worker types carry the public R2 account id (covered by the regex too)
-  '''apps/web/worker-configuration\.d\.ts$''',
 ]
+
+# The mobile app's AsyncStorage key names (`STORAGE_KEY = "fluncle.<store>.v1"`) — local
+# storage namespaces, not credentials. The `KEY` keyword plus the dotted name sits right
+# at generic-api-key's 3.5 entropy floor: "fluncle.saved.v1" scrapes under, "fluncle.mix.v1"
+# lands a hair over and reddened CI. Path-conditioned (AND) rather than global: an unanchored
+# match-target regex in the global allowlist would exempt ANY finding that merely contains
+# the pattern — e.g. a real key pasted as `"fluncle.prod.v1-<token>"` — anywhere in the repo.
+[[allowlists]]
+description = "mobile AsyncStorage key names"
+condition = "AND"
+paths = ['''(^|/)apps/mobile/src/lib/''']
+regexTarget = "match"
+regexes = ['''fluncle\.[a-z0-9.-]+\.v\d+''']
