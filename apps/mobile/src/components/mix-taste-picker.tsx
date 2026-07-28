@@ -81,6 +81,7 @@ export function MixTastePicker({
   selected: string[];
 }) {
   const [q, setQ] = useState("");
+  // oxlint-disable-next-line typescript/no-useless-default-assignment -- false positive: no initialData seed, data is T | undefined (tsc agrees)
   const { data: artists = [] } = useMixableArtists(q);
   const seededSet = new Set(selected);
 

@@ -37,7 +37,7 @@
   "devDependencies": {
     "@types/react": "catalog:",
     "@types/react-dom": "catalog:",
-    "shadcn": "~4.11.0",
+    "shadcn": "~4.11.1",
     "typescript": "catalog:"
   },
   "peerDependencies": {

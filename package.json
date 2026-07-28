@@ -21,17 +21,17 @@
       "@orpc/tanstack-query": "1.14.7",
       "@orpc/zod": "1.14.7",
       "@phosphor-icons/react": "~2.1.10",
-      "@remotion/bundler": "~4.0.487",
-      "@remotion/captions": "~4.0.487",
-      "@remotion/cli": "~4.0.487",
-      "@remotion/fonts": "~4.0.487",
-      "@remotion/renderer": "~4.0.487",
-      "@tanstack/react-query": "~5.101.2",
+      "@remotion/bundler": "~4.0.499",
+      "@remotion/captions": "~4.0.499",
+      "@remotion/cli": "~4.0.499",
+      "@remotion/fonts": "~4.0.499",
+      "@remotion/renderer": "~4.0.499",
+      "@tanstack/react-query": "~5.101.4",
       "@types/bun": "~1.3.14",
       "@types/node": "~26.1.1",
       "@types/react": "~19.2.17",
       "@types/react-dom": "~19.2.3",
-      "ai": "~7.0.19",
+      "ai": "~7.0.37",
       "class-variance-authority": "~0.7.1",
       "cmdk": "~1.1.1",
       "cnfast": "~0.0.8",
@@ -39,8 +39,8 @@
       "dotenv": "~17.4.2",
       "drizzle-kit": "~0.31.10",
       "drizzle-orm": "~0.45.2",
-      "react-dom": "~19.2.7",
-      "remotion": "~4.0.487",
+      "react-dom": "~19.2.8",
+      "remotion": "~4.0.499",
       "sonner": "~2.0.7",
       "typescript": "~7.0.2",
       "zod": "4.4.3"
@@ -71,11 +71,11 @@
     "@types/node": "catalog:",
     "husky": "~9.1.7",
     "lint-staged": "~17.0.8",
-    "oxfmt": "~0.58.0",
+    "oxfmt": "~0.60.0",
     "oxlint": "~1.73.0",
-    "oxlint-tsgolint": "~0.24.0",
-    "react-doctor": "~0.5.8",
-    "turbo": "~2.10.4",
+    "oxlint-tsgolint": "~7.0.2001",
+    "react-doctor": "~0.9.1",
+    "turbo": "~2.10.6",
     "typescript": "catalog:"
   },
   "lint-staged": {
@@ -86,7 +86,7 @@
   },
   "packageManager": "bun@1.3.14",
   "patchedDependencies": {
-    "@remotion/bundler@4.0.487": "patches/@remotion%2Fbundler@4.0.487.patch"
+    "@remotion/bundler@4.0.499": "patches/@remotion%2Fbundler@4.0.499.patch"
   },
   "trustedDependencies": [
     "@shopify/react-native-skia"

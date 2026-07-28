@@ -83,6 +83,7 @@ export default function MixScreen() {
 
   const tokens = chainTokens(chain);
   const tail = tokens[tokens.length - 1];
+  // oxlint-disable-next-line typescript/no-useless-default-assignment -- false positive: no initialData seed, data is T | undefined (tsc agrees)
   const { data: candidates = [], isPending: railPending } = useMixableTracks({
     exclude: tokens,
     idOrLogId: tail,
@@ -410,6 +411,7 @@ function OpenerStep({
 }) {
   const [query, setQuery] = useState("");
   const [debounced, setDebounced] = useState("");
+  // oxlint-disable-next-line typescript/no-useless-default-assignment -- false positive: no initialData seed, data is T | undefined (tsc agrees)
   const { data: openers = [], isPending: openersPending } = useMixOpeners(taste);
 
   // A keystroke is not a query (the archive screen's 180ms idiom).
