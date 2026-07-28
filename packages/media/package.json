@@ -20,7 +20,7 @@
     "@remotion/cli": "catalog:",
     "@remotion/fonts": "catalog:",
     "@remotion/renderer": "catalog:",
-    "react": "~19.2.8",
+    "react": "catalog:",
     "react-dom": "catalog:",
     "remotion": "catalog:"
   },

@@ -39,6 +39,7 @@
       "dotenv": "~17.4.2",
       "drizzle-kit": "~0.31.10",
       "drizzle-orm": "~0.45.2",
+      "react": "~19.2.8",
       "react-dom": "~19.2.8",
       "remotion": "~4.0.499",
       "sonner": "~2.0.7",
@@ -64,7 +65,7 @@
     "test:scripts": "bun test --cwd scripts && bun test --cwd docs/agents/hermes/scripts && bun test --cwd packages/skills/fluncle-track-enrichment/scripts && bun test --cwd packages/skills/fluncle-box-restore/scripts && bun test --cwd packages/skills/fluncle-catalogue-prune/scripts",
     "prepare": "command -v husky > /dev/null 2>&1 && husky || true",
     "typecheck": "turbo run typecheck",
-    "doctor": "npx react-doctor@latest"
+    "doctor": "react-doctor"
   },
   "devDependencies": {
     "@types/bun": "catalog:",
@@ -83,6 +84,9 @@
       "oxlint --fix --ignore-path .prettierignore --no-error-on-unmatched-pattern --deny-warnings",
       "oxfmt --write --ignore-path .prettierignore --no-error-on-unmatched-pattern"
     ]
+  },
+  "engines": {
+    "bun": ">=1.3.14"
   },
   "packageManager": "bun@1.3.14",
   "patchedDependencies": {
