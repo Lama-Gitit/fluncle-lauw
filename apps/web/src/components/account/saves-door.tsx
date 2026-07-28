@@ -1,4 +1,4 @@
-// The Saves door as the workbench (docs/planning/account-redesign-brief.md, Phase B3).
+// The Saves door as the workbench.
 // A saved finding IS a certified finding, so its row adopts the archive's ignition
 // grammar: the Log ID leads in Oxanium and heats to gold on hover/focus, the row washes
 // the Gold Veil, the cover scales, and the whole row opens `/log/<id>`. The cover doubles

@@ -3,7 +3,7 @@
 // (`fluncle-cluster`), scheduled NIGHTLY by a rave-02 HOST systemd timer
 // (../cluster-timer/), not a Hermes gateway cron: a stateful batch job that reads the
 // whole embedded corpus and writes the map wants the box, never the shared serial runner.
-// See ../cluster-timer/README.md + docs/agents/cluster-engine.md + docs/rfcs/browse-by-feel.md.
+// See ../cluster-timer/README.md + docs/agents/cluster-engine.md.
 //
 // LIVE-INTENT. Version-controlled source; the repo is canonical and the box is a deploy
 // target (fluncle-hermes-operator skill). Invoked by the bash wrapper (cluster-sweep.sh) the

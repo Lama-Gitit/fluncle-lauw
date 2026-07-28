@@ -26,8 +26,7 @@ import {
 } from "@/lib/server/account-data";
 import { createCsrfToken, getPublicSession } from "@/lib/server/public-auth";
 
-// The account area, redesigned as a per-door surface (docs/planning/account-redesign-brief.md,
-// Phase A). The route owns the loader, the two `createServerFn`s the loader calls, the
+// The account area, redesigned as a per-door surface. The route owns the loader, the two `createServerFn`s the loader calls, the
 // page shell + per-door masthead, and the door switch; each door's contents live in
 // its own module under components/account. Loading is SSR-first (real content on first
 // paint, no blank→pop) with a react-query hybrid seeded from the loader; per-door

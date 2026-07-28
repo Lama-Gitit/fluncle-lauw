@@ -1,5 +1,7 @@
 # Minimizing Fluncle's data-access latency — research & recommendation
 
+_2026-07-28 correction, read this first: the vector half has since shipped as `apps/sonar` (an exact-scan engine on a box, behind per-surface dark flags — [docs/vector-serving.md](../vector-serving.md)), and Phase 0 shipped too (the query-wave collapse + the `/log` and entity-page edge cache), so §1's current-state description is pre-Phase-0 and §6's open question 4 is CLOSED — the ≤12-branch `union all` recommendations scan was folded into one pass (the standing never-a-branch-per-probe rule in `recommendations.ts`) and the vector question moved to sonar. The roadmap owns live status; this doc still owns the D1 rejection and the remaining Placement-Hints / own-box analysis._
+
 _Research date: 2026-07-16. Method: 6 parallel deep-dives (Turso-native, Cloudflare D1, CF placement/DO, vector search, alternative distributed DBs, DB-agnostic caching) + a codebase current-state recon + an adversarial fact-check of every load-bearing claim against 2026 primary sources. This is a decision brief, not canon — the codebase and the canon docs win on any conflict._
 
 ---
