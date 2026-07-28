@@ -5,5 +5,3 @@
 linker = "hoisted"
 # Only install package versions published at least 3 days ago
 minimumReleaseAge = 259200
-# cnfast — adopted ahead of the age window by explicit operator decision.
-minimumReleaseAgeExcludes = ["cnfast"]
