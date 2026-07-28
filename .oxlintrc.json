@@ -9,7 +9,23 @@
     "apps/web/src/routeTree.gen.ts",
     "apps/web/worker-configuration.d.ts"
   ],
-  "plugins": ["eslint", "import", "oxc", "react", "typescript", "unicorn", "vitest"],
+  "plugins": ["eslint", "import", "jsx-a11y", "oxc", "react", "typescript", "unicorn", "vitest"],
+  // jsx-a11y is a DOM ruleset: React Native's a11y model (accessibilityLabel, no <output>/
+  // <fieldset> elements, autoFocus as standard form UX) makes its findings noise there, so
+  // mobile opts back out of the rules that fire on RN primitives. (An override can't drop a
+  // whole plugin, so the DOM-shaped rules are named; extend this list if a new one fires.)
+  "overrides": [
+    {
+      "files": ["apps/mobile/**"],
+      "rules": {
+        "jsx-a11y/click-events-have-key-events": "off",
+        "jsx-a11y/media-has-caption": "off",
+        "jsx-a11y/no-autofocus": "off",
+        "jsx-a11y/no-noninteractive-element-interactions": "off",
+        "jsx-a11y/prefer-tag-over-role": "off"
+      }
+    }
+  ],
   "rules": {
     "curly": "error",
     "eslint/sort-keys": "error",
