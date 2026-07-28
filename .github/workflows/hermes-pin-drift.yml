@@ -7,10 +7,11 @@ name: Hermes Pin Drift
 # bump, opens a PR; a major bump or a newer Hermes base image is reported as an
 # issue, never auto-bumped. On merge of a Dockerfile pin, rave-02 self-deploys it.
 #
-# Auth: with no PIN_DRIFT_TOKEN secret it runs on the default GITHUB_TOKEN — it
-# opens the PR for an operator to review + merge (CI runs on their interaction).
-# Provide a fine-scoped PAT as PIN_DRIFT_TOKEN to make it fully hands-off: the PR
-# then triggers CI and is set to auto-merge on green (matches the old Mac routine).
+# Auth: PIN_DRIFT_TOKEN (a fine-scoped PAT: Contents + Pull requests read/write)
+# is effectively REQUIRED — this repo blocks the default GITHUB_TOKEN from creating
+# PRs ("Allow GitHub Actions to create PRs" is off), so the github.token fallback
+# below only covers read paths and fails loudly at `gh pr create`. With the PAT the
+# run is fully hands-off: the PR triggers CI and auto-merges on green.
 
 on:
   schedule:
@@ -75,8 +76,7 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git checkout -b "$branch"
-          git add docs/agents/hermes/Dockerfile package.json \
-            .github/workflows/quality-checks.yml .github/workflows/cli-release.yml
+          git add docs/agents/hermes/Dockerfile package.json
           git commit -m "$PR_TITLE"
           git push -u origin "$branch"
           gh pr create --base main --head "$branch" \

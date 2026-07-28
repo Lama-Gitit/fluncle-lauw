@@ -32,9 +32,21 @@ env:
   TARGET: x86_64-unknown-linux-musl
 
 jobs:
+  # The gate the deploy:gate can't provide: sonar has no package.json, so turbo never sees
+  # it — its fmt/clippy/test live in Quality Checks. Publishing must WAIT for that verdict
+  # instead of racing it: without this `needs`, a commit that fails clippy or `cargo test`
+  # still shipped a binary the box's hourly freshen would swap in (the box pre-smoke only
+  # catches a crashing binary, not a wrong one).
+  quality:
+    name: Quality Checks
+    uses: ./.github/workflows/quality-checks.yml
+    with:
+      checkout-ref: ${{ github.sha }}
+
   build:
     name: Build + publish the static musl sonar binary
     runs-on: ubuntu-latest
+    needs: [quality]
     timeout-minutes: 30
     permissions:
       contents: write # create/move the rolling tag and upload the release assets

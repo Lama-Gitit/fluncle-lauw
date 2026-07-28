@@ -5,8 +5,11 @@
 # the SHIP-vs-BRAKE doctrine (packages/skills/fluncle-maintenance) in plain code:
 #   • SAFE drift  — a patch/minor bump, SAME major — of the `fluncle` CLI, the
 #     Claude Code CLI, or bun → edits the pin in place so the workflow can open a
-#     PR. bun moves in all THREE places at once: the Dockerfile installer line,
-#     package.json `packageManager`, and both CI workflows' `bun-version`.
+#     PR. bun moves in TWO places: the Dockerfile installer line and package.json
+#     `packageManager` — every workflow reads the bun version from packageManager
+#     via setup-bun's `bun-version-file`, so the workflows follow automatically
+#     (a literal per-workflow bun-version once split the toolchain: only 2 of 5
+#     workflows were in this script's rewrite set).
 #   • RISKY drift — a MAJOR bump (any of the three), or a newer Nous Research
 #     Hermes BASE image tag — is recorded for a report-only issue, never edited.
 #     A major could rename/remove a command a cron calls; the base image's failure
@@ -29,8 +32,6 @@ MODE="${1:---check}"
 REPO_ROOT="${REPO_ROOT:-$(git rev-parse --show-toplevel)}"
 DOCKERFILE="$REPO_ROOT/docs/agents/hermes/Dockerfile"
 PKG_JSON="$REPO_ROOT/package.json"
-WF_QUALITY="$REPO_ROOT/.github/workflows/quality-checks.yml"
-WF_RELEASE="$REPO_ROOT/.github/workflows/cli-release.yml"
 TMP="${RUNNER_TEMP:-/tmp}"
 PR_BODY="$TMP/pin-drift-pr-body.md"
 ISSUE_BODY="$TMP/pin-drift-issue-body.md"
@@ -133,10 +134,8 @@ fi
 if [ -n "$APPLY_BUN" ]; then
   inplace "$DOCKERFILE"  "bun-v$CUR_BUN"          "bun-v$APPLY_BUN"          # installer line
   inplace "$DOCKERFILE"  "bun@$CUR_BUN"           "bun@$APPLY_BUN"           # the comment reference
-  inplace "$PKG_JSON"    "bun@$CUR_BUN"           "bun@$APPLY_BUN"           # packageManager
-  inplace "$WF_QUALITY"  "bun-version: $CUR_BUN"  "bun-version: $APPLY_BUN"  # CI
-  inplace "$WF_RELEASE"  "bun-version: $CUR_BUN"  "bun-version: $APPLY_BUN"  # CI
-  CHANGES+=("\`bun\` \`$CUR_BUN\` → \`$APPLY_BUN\` (Dockerfile + package.json + both workflows, kept in sync)")
+  inplace "$PKG_JSON"    "bun@$CUR_BUN"           "bun@$APPLY_BUN"           # packageManager — every workflow reads this via bun-version-file
+  CHANGES+=("\`bun\` \`$CUR_BUN\` → \`$APPLY_BUN\` (Dockerfile + package.json packageManager; workflows follow via bun-version-file)")
 fi
 
 # ── write the PR body + emit outputs ──────────────────────────────────────────
