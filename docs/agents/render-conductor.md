@@ -75,26 +75,33 @@ A resumed snapshot carries a stale `fluncle` checkout — the clone from wheneve
 
 When a box goes stale or wedged — the checkout freshen silently failing on flaky box.ascii `box ssh` 500s, `machine_not_running` loops, a resume that keeps producing no render — the recovery is **reap → cold provision**, and it always converges because a fresh box clones current `main` by construction:
 
-1. `box delete <id>` — reap the wedged box.
+1. `box stop <id>` then `box extend <id> --ttl 60` — park the wedged box and put it on a reclamation clock (there is **no `box delete`**; see the verb trap below).
 2. Clear the conductor's box-id state file — so the next tick has no box to resume.
 3. Set the conductor state to `idle`.
 4. Trigger the render service — the conductor cold-provisions a fresh box from clean `main`.
 
 The conductor already condemns a box that fails to launch a render (it deletes the box, clears the box-id, and stays idle so a fresh box provisions next tick). The manual reap is for the cases its own guards do not catch. The exact commands (box IDs, state-file path) are the ops runbook in the private companion repo.
 
-### A condemn ends with the box gone, or with its id written down
+### The verb trap: there is no `box delete`
 
-The condemn used to be fire-and-forget — `box stop` and `box delete` under `>/dev/null 2>&1 || true`, then the box-id file cleared **regardless**. A box.ascii 5xx therefore meant the conductor forgot the id while the box lived on, referenced by nothing and reachable by no later tick.
+**`box delete` does not exist, and the conductor called it for nineteen days.** It was introduced with the condemn on 2026-07-09. box.ascii is pre-1.0 and the bundled CLI tracks a _channel_ rather than a pinned tag (hermes-agent.md § The image), so the verb was retired underneath us. Both the operator Mac and rave-02 run `0.1.135-ascii-prod1`, whose verb set is: `new` `info` `list` `extend` `stop` `resume` `prompt` `interrupt` `events` `limits` `fork` `ssh` `host` `desktop` `scp` `forward` `snapshots` `snapshot`. No `delete`, no `rm`, no `destroy`.
 
-That is not hypothetical. On 2026-07-27 a render finished and the conductor chained straight to the next pick; the resume raced the park, box.ascii answered `box_restoring (500)` to every call, the trigger never launched, and the condemn's `stop` + `delete` hit the same 500 silently. The conductor cleared its box-id and moved on. The next tick provisioned a fresh box beside the abandoned one, which sat in the account until an operator noticed.
+Because the call sat under `>/dev/null 2>&1 || true`, every condemn since then failed on `unrecognized subcommand` and was swallowed whole — so **every wedged box the conductor ever condemned was orphaned**, each one still taking daily snapshots with `archiveAfter: null`. The 2026-07-27 `box_restoring` 500 did not cause that; it merely made one instance visible.
 
-So the condemn now has a contract: **it ends with the box PROVEN absent, or with its id recorded for a later tick.** Three pieces enforce it, all in `render-conductor.sh`:
+This is the same class as the claude version trap already documented below, and the lesson generalises: a channel-tracking CLI behind a `|| true` is an error you have decided never to see.
 
-- **`box_gone`** returns success ONLY when a `box list` positively proves the id is absent. An unreachable API, a failed list, or an empty body is "not proven gone", never "deleted" — otherwise one wobble would drop an id from the ledger and orphan that box for good.
-- **`condemn_box`** retries `stop`+`delete` `CONDEMN_ATTEMPTS` times (default 3, `CONDEMN_BACKOFF` 3s apart — `box_restoring` is transient and usually clears inside that). If the box still is not gone, the id goes to the **orphan ledger** (`~/.render-conductor/orphan-boxes`, one id per line) and the operator gets one Discord alert.
-- **`reap_orphans`** drains that ledger at the top of **every** tick, idle or rendering, bounded by `REAP_PER_TICK` (default 5) so a long ledger can never eat the tick budget. It runs before the state machine on purpose: a wedged box is precisely the case where the next tick is busy rendering on its replacement, so gating the reap on `idle` would leave the orphan standing for the length of a render.
+### A condemn ends with the box parked, on a clock, and written down
 
-The net effect is that a box.ascii outage costs a delayed cleanup rather than a permanent orphan, with no operator involvement. A non-empty ledger that survives several ticks is the signal that something needs a look — that is what the alert is for.
+The replacement mechanism is lifetime-based. `box extend <id> --ttl <seconds>` sets the box's `archiveAfter`, after which box.ascii reclaims the box and its snapshots. Verified end to end on 2026-07-28: a `--ttl 60` on the orphaned box flipped `archiveAfter` from `null` to a timestamp, and the box was gone ~90 seconds later.
+
+Reclamation is therefore **asynchronous**, which inverts the old design. A condemn cannot prove absence in its own tick, so the orphan ledger stops being a fallback and becomes the load-bearing half: every condemned id is written down, and later ticks are what establish that box.ascii actually took it. Four pieces, all in `render-conductor.sh`:
+
+- **`mark_for_reclaim`** parks the box and sets the TTL. Idempotent, so re-issuing it on an id every tick is safe. It returns the `extend` call's **real exit status** rather than swallowing it — that is the tripwire the old code lacked.
+- **`condemn_box`** calls it, logs whether the TTL was accepted, and **always** files the id. There is no synchronous success to hope for any more.
+- **`box_gone`** succeeds ONLY when a `box list` positively proves absence. An unreachable API or empty body is "not proven gone", never "reclaimed" — otherwise one wobble would drop an id from the ledger and orphan that box for good.
+- **`reap_orphans`** works the ledger at the top of **every** tick, idle or rendering, bounded by `REAP_PER_TICK` (default 5). It drops the ids box.ascii has taken, re-issues the TTL on the ones it has not (which also repairs an id filed while the API was down), and alerts **once** on a box still standing after `ORPHAN_ALERT_AFTER` (default 6h). Running it before the state machine is deliberate: a wedged box is precisely the case where the next tick is busy rendering on its replacement, so gating the reap on `idle` would leave the orphan standing for a whole render.
+
+The ledger is `boxId<TAB>firstFiledEpoch<TAB>alerted` at `~/.render-conductor/orphan-boxes`, same temp-then-`mv` discipline as the poison ledger. The timestamp is what keeps the reaper quiet through the normal reclamation lag while still speaking up about a box that is genuinely stuck — and if the `extend` verb is ever retired the way `delete` was, the failure now lands in the log immediately and the 6h alert fires, instead of vanishing into a `|| true`.
 
 ## Snapshot forensics (read a stopped box without resuming)
 
@@ -104,7 +111,7 @@ A stopped box's filesystem is readable WITHOUT resuming it (no billing for a run
 - `box snapshot tree <id>` — browse the snapshot's filesystem.
 - `box snapshot pull <id>` — pull snapshot files to the operator machine.
 
-For selective extraction of a large file, resume + stream it off (`box ssh -- "gzip -c <file>"` piped to the operator machine), then stop the box. The box CLI verbs that exist are `resume` / `stop` / `delete` / `ssh` / `scp` / `snapshot` — there is **no `start`** (`resume` wakes a parked box; `provision-rave-03.sh` creates a new one).
+For selective extraction of a large file, resume + stream it off (`box ssh -- "gzip -c <file>"` piped to the operator machine), then stop the box. The box CLI verb set (`0.1.135-ascii-prod1`) is `new` `info` `list` `extend` `stop` `resume` `prompt` `interrupt` `events` `limits` `fork` `ssh` `host` `desktop` `scp` `forward` `snapshots` `snapshot`. Two absences bite: there is **no `start`** (`resume` wakes a parked box; `provision-rave-03.sh` creates a new one) and there is **no `delete`** (`stop` + `extend --ttl` is how a box goes away — see the verb trap above). Re-read this list rather than trusting it; the CLI tracks a channel and has retired a verb before.
 
 ## Known issues (documented as such)
 

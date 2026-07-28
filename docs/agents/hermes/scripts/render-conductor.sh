@@ -92,13 +92,12 @@ MARKER_SKEW="${MARKER_SKEW:-300}"         # clock-skew grace when checking a don
 # re-poisons). A clean render clears that finding's ledger.
 POISON_THRESHOLD="${POISON_THRESHOLD:-3}" # consecutive render failures before a finding is skipped
 POISON_TTL="${POISON_TTL:-21600}"         # seconds a poisoned finding is skipped before one retry (6h)
-# Condemning a box must END with the box gone or with its id written down. box.ascii 5xxs
-# transiently (a `box_restoring` window right after a park), so retry briefly in-tick, then
-# hand the id to the orphan ledger every later tick drains. 3 tries ~= 6s + API latency,
-# well inside the unit's ~120s kill.
-CONDEMN_ATTEMPTS="${CONDEMN_ATTEMPTS:-3}" # in-tick stop+delete retries before an id is filed as an orphan
-CONDEMN_BACKOFF="${CONDEMN_BACKOFF:-3}"   # seconds between those retries
-REAP_PER_TICK="${REAP_PER_TICK:-5}"       # max orphan boxes a single tick will try to reap (tick-budget guard)
+# Condemning a box ends with its id WRITTEN DOWN — box.ascii has no synchronous delete verb
+# (see the box-lifecycle block), only a reclamation TTL, so absence is something a later
+# tick proves rather than this one.
+CONDEMN_TTL="${CONDEMN_TTL:-60}"              # seconds until box.ascii may reclaim a condemned box
+REAP_PER_TICK="${REAP_PER_TICK:-5}"           # max orphans a single tick works through (tick-budget guard)
+ORPHAN_ALERT_AFTER="${ORPHAN_ALERT_AFTER:-21600}" # seconds a condemned box may linger before one alert (6h)
 DONE_MARKER='${HOME:-/home/user}/conductor-run.done'
 API_URL="${FLUNCLE_API_URL:-https://www.fluncle.com}"
 
@@ -160,13 +159,26 @@ discord_alert() {
 }
 
 # --- box lifecycle: condemn + orphan reaping ---------------------------------------
-# Deleting a render box used to be fire-and-forget: `stop`/`delete` under
-# `>/dev/null 2>&1 || true`, then the box-id file was cleared REGARDLESS. So a box.ascii
-# 5xx meant the conductor forgot the id while the box lived on, unreferenced, forever.
-# That is not theoretical — 2026-07-27: a park/resume race left the box `restoring`, every
-# call 500'd, and bx_hyzhuhh5 was orphaned in the account while the very next tick
-# provisioned a fresh box beside it. The rule now: a condemn ends with the box PROVEN gone,
-# or with its id written down. Nothing is ever merely hoped-deleted.
+# THE VERB TRAP (2026-07-28): this block used to run `box delete <id>`. That subcommand
+# NO LONGER EXISTS — box.ascii is pre-1.0 and the CLI tracks a channel rather than a
+# pinned tag (see hermes-agent.md § The image), so the verb was retired under us. Both the
+# Mac and rave-02 run 0.1.135-ascii-prod1, whose verbs are: new info list extend stop
+# resume prompt interrupt events limits fork ssh host desktop scp forward snapshots
+# snapshot. No delete, no rm, no destroy. Because the old call sat under
+# `>/dev/null 2>&1 || true`, every condemn since 2026-07-09 failed on `unrecognized
+# subcommand` and was swallowed — so EVERY wedged box the conductor ever condemned was
+# orphaned, and the 2026-07-27 `box_restoring` 500 only made one visible.
+#
+# The replacement is lifetime-based: `box extend <id> --ttl <seconds>` sets `archiveAfter`,
+# after which box.ascii reclaims the box and its snapshots. So a condemn is now stop (drop
+# the compute) + extend --ttl (mark for reclamation), and reclamation is ASYNCHRONOUS —
+# the box lingers for a short while by design.
+#
+# That asynchrony is why the orphan ledger is the load-bearing half rather than a fallback:
+# a condemn cannot prove absence in-tick, so every condemned id is written down and later
+# ticks watch it until box.ascii has actually taken it. The rule is unchanged in spirit —
+# nothing is ever merely hoped-deleted — but "proven gone" is now something a LATER tick
+# establishes, not this one.
 
 # `0` (success) ONLY when box.ascii PROVES the id is absent. An unreachable API, a failed
 # list, or an empty body returns non-zero — "not proven gone" must never read as "deleted",
@@ -182,68 +194,81 @@ box_gone() {
   esac
 }
 
+# Park a box and mark it for reclamation. Idempotent — safe to re-issue every tick on an
+# id box.ascii has not taken yet. `0` when the CLI accepted the TTL (the box is now on a
+# clock), non-zero when it did not (API down, or the verb moved again).
+mark_for_reclaim() {
+  local id="$1"
+  [ -n "$id" ] || return 1
+  "$BOX_BIN" stop "$id" >>"$LOG_FILE" 2>&1 || true # best-effort: a stopped box errors here
+  "$BOX_BIN" extend "$id" --ttl "$CONDEMN_TTL" >>"$LOG_FILE" 2>&1
+}
+
+# The ledger is `boxId<TAB>firstFiledEpoch<TAB>alerted`, same temp+mv discipline as the
+# poison ledger. The timestamp is what lets the reaper stay quiet during the normal
+# reclamation lag and speak up only when a box is genuinely stuck.
 add_orphan() {
   local id="$1"
   [ -n "$id" ] || return 0
-  grep -qxF "$id" "$ORPHANS_FILE" 2>/dev/null && return 0
-  printf '%s\n' "$id" >>"$ORPHANS_FILE"
-  discord_alert "render conductor: could not delete render box $id — filed as an orphan, later ticks will retry ($API_URL/admin)"
+  awk -F'\t' -v id="$id" '$1==id{f=1} END{exit f?0:1}' "$ORPHANS_FILE" 2>/dev/null && return 0
+  printf '%s\t%s\t0\n' "$id" "$(now)" >>"$ORPHANS_FILE"
 }
 
 drop_orphan() {
   local id="$1"
   [ -n "$id" ] || return 0
   [ -f "$ORPHANS_FILE" ] || return 0
-  # `grep -v` exits 1 when NOTHING is left to print (the ledger draining to empty), so the
-  # mv must NOT hang off its status — chaining `&&` here would make the LAST orphan
-  # un-droppable and the ledger permanently non-empty.
-  grep -vxF "$id" "$ORPHANS_FILE" >"$ORPHANS_FILE.tmp" 2>/dev/null
+  # `awk` prints nothing when the ledger drains to empty; unlike `grep -v` that is still a
+  # 0 exit, but keep the mv unchained anyway so this can never strand a stale ledger.
+  awk -F'\t' -v id="$id" '$1!=id' "$ORPHANS_FILE" >"$ORPHANS_FILE.tmp" 2>/dev/null
   mv "$ORPHANS_FILE.tmp" "$ORPHANS_FILE" 2>/dev/null || true
 }
 
-# Stop + delete a box and PROVE it is gone; file the id for a later tick if it is not.
-condemn_box() {
-  local id="$1" attempt=1
-  [ -n "$id" ] || return 0
-  while :; do
-    "$BOX_BIN" stop "$id" >>"$LOG_FILE" 2>&1 || true
-    "$BOX_BIN" delete "$id" >>"$LOG_FILE" 2>&1 || true
-    if box_gone "$id"; then
-      log "condemned box $id — deleted (attempt $attempt)"
-      drop_orphan "$id"
-      return 0
-    fi
-    [ "$attempt" -ge "$CONDEMN_ATTEMPTS" ] && break
-    attempt=$((attempt + 1))
-    sleep "$CONDEMN_BACKOFF"
-  done
-  add_orphan "$id"
-  log "could not delete box $id after $CONDEMN_ATTEMPTS attempts — filed to the orphan ledger"
-  return 1
+mark_orphan_alerted() {
+  local id="$1"
+  awk -F'\t' -v id="$id" 'BEGIN{OFS="\t"} $1==id{$3=1} {print}' "$ORPHANS_FILE" >"$ORPHANS_FILE.tmp" 2>/dev/null
+  mv "$ORPHANS_FILE.tmp" "$ORPHANS_FILE" 2>/dev/null || true
 }
 
-# Drain the orphan ledger, bounded by REAP_PER_TICK so a long ledger can never eat the
-# tick budget. Runs every tick, so an id filed while box.ascii was wobbling is deleted as
-# soon as the API is healthy again with no operator involvement. (The `while read` holds an
-# fd on the ledger while drop_orphan rewrites it via temp+mv; the loop keeps iterating the
-# original list and each drop composes onto the current file, which is what we want.)
+# Condemn a box: park it, put it on a reclamation clock, and WRITE THE ID DOWN. There is no
+# synchronous delete to succeed at any more, so this always files — the ledger is how the
+# id survives the `: >"$BOXID_FILE"` that follows, and later ticks are what prove the box
+# actually went away.
+condemn_box() {
+  local id="$1"
+  [ -n "$id" ] || return 0
+  if mark_for_reclaim "$id"; then
+    log "condemned box $id — parked and marked for reclamation in ${CONDEMN_TTL}s"
+  else
+    log "condemned box $id — could NOT set its reclamation TTL (box.ascii unreachable?); filed for retry"
+  fi
+  add_orphan "$id"
+}
+
+# Drain the ledger, bounded by REAP_PER_TICK so it can never eat the tick budget. Runs every
+# tick: drop the ids box.ascii has taken, re-issue the TTL on the ones it has not (idempotent,
+# and it repairs an id filed while the API was down), and alert ONCE on a box still standing
+# after ORPHAN_ALERT_AFTER — the normal reclamation lag stays silent, a stuck box does not.
+# (The `while read` holds an fd on the ledger while drop_orphan rewrites it via temp+mv; the
+# loop keeps iterating the original list and each write composes onto the current file.)
 reap_orphans() {
-  local id reaped=0
+  local id filed alerted reaped=0
   [ -s "$ORPHANS_FILE" ] || return 0
-  while IFS= read -r id; do
+  while IFS=$'\t' read -r id filed alerted; do
     [ -n "$id" ] || continue
     [ "$reaped" -lt "$REAP_PER_TICK" ] || break
     reaped=$((reaped + 1))
     if box_gone "$id"; then
-      log "orphan $id already gone — dropping from the ledger"
+      log "orphan $id reclaimed — dropping from the ledger"
       drop_orphan "$id"
       continue
     fi
-    "$BOX_BIN" stop "$id" >>"$LOG_FILE" 2>&1 || true
-    "$BOX_BIN" delete "$id" >>"$LOG_FILE" 2>&1 || true
-    if box_gone "$id"; then
-      log "reaped orphan box $id"
-      drop_orphan "$id"
+    mark_for_reclaim "$id" || true
+    case "$filed" in '' | *[!0-9]*) filed="$(now)" ;; esac
+    if [ "$alerted" != "1" ] && [ "$(($(now) - filed))" -gt "$ORPHAN_ALERT_AFTER" ]; then
+      log "orphan $id still standing after ${ORPHAN_ALERT_AFTER}s — alerting"
+      discord_alert "render conductor: render box $id has not been reclaimed since it was condemned — needs a look ($API_URL/admin)"
+      mark_orphan_alerted "$id"
     fi
   done <"$ORPHANS_FILE"
 }
