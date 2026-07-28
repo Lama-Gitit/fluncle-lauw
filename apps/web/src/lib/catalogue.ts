@@ -42,6 +42,32 @@ export function parseCatalogueSort(value: unknown): CatalogueSort {
 export const GRAPH_GROUP_PAGE_SIZE = 12;
 
 /**
+ * A pager anchor in the CANONICAL shape: the default sort stays implicit and page 1 is the bare
+ * URL, mirroring how the page's canonical link is built (per-page, sort-collapsing). The pager's
+ * anchors are what crawlers walk, so an href that spells out the default (`?sort=name&page=4`)
+ * mints a URL variant whose canonical points elsewhere — a wasted fetch per link on a young
+ * domain's crawl budget. The sort enters the URL only when the reader actually leaves the
+ * default, via the sort control's navigate.
+ */
+export function cataloguePageHref(
+  base: string,
+  page: number,
+  sort: CatalogueSort,
+  defaultSort: CatalogueSort,
+): string {
+  const params = new URLSearchParams();
+  if (sort !== defaultSort) {
+    params.set("sort", sort);
+  }
+  if (page > 1) {
+    params.set("page", String(page));
+  }
+  const query = params.toString();
+
+  return query ? `${base}?${query}` : base;
+}
+
+/**
  * The most rows any ONE group may contribute. Capped in SQL with a `row_number()` window, so
  * one prolific artist cannot blow the page's budget. A group that hits it says so and links to
  * its own page, which carries the rest.

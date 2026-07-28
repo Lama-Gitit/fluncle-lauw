@@ -126,6 +126,9 @@ describe("/artist/$slug/fresh.xml — release-framed, two tiers, one artist", ()
     expect(res.headers.get("Cache-Control")).toBe(
       "public, max-age=300, s-maxage=3600, stale-while-revalidate=86400",
     );
+    // Feeds are for readers, never search results — noindex keeps the thousands of
+    // rel=alternate-discovered entity feeds out of GSC's crawled-not-indexed churn.
+    expect(res.headers.get("X-Robots-Tag")).toBe("noindex");
   });
 
   it("404s an unknown slug (never a 200 with an empty feed)", async () => {

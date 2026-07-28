@@ -128,6 +128,11 @@ export function freshFeedResponse(xml: string): Response {
       // while a background refresh runs.
       "Cache-Control": "public, max-age=300, s-maxage=3600, stale-while-revalidate=86400",
       "Content-Type": "application/rss+xml; charset=utf-8",
+      // A feed is for readers, never a search result. Every artist/label page advertises its
+      // fresh feed via rel=alternate, so crawlers discover thousands of them — most an empty
+      // 30-day window — and without this they sit in GSC's "crawled, not indexed" judgment
+      // bucket being re-evaluated forever. noindex settles them without touching feed readers.
+      "X-Robots-Tag": "noindex",
     },
   });
 }

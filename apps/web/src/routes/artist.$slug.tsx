@@ -33,7 +33,7 @@ import { jsonLdScript } from "@/lib/json-ld";
 import { artistBreadcrumbsJsonLd, musicGroupJsonLd } from "@/lib/log-schema";
 import { bioMetaDescription } from "@/lib/meta-description";
 import { albumCoverAtSize } from "@/lib/media";
-import { type CatalogueSort } from "@/lib/catalogue";
+import { type CatalogueSort, cataloguePageHref } from "@/lib/catalogue";
 import { type ArtistPageData, type ArtistSocialLink } from "./-artist-page-data";
 
 // A confirmed/auto social — the brand mark + a plain label, from simple-icons
@@ -415,7 +415,9 @@ function ArtistPage() {
             <CatalogueRecords artistName={name} records={catalogue.groups} />
 
             <CataloguePager
-              buildHref={(page) => `/artist/${slug}?sort=${sort}&page=${page}`}
+              buildHref={(page) =>
+                cataloguePageHref(`/artist/${slug}`, page, sort, ARTIST_CATALOGUE_SORT_DEFAULT)
+              }
               label={`More from ${name}, more pages`}
               page={catalogue.page}
               pageCount={catalogue.pageCount}

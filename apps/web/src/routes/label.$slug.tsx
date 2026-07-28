@@ -14,7 +14,13 @@ import { jsonLdScript } from "@/lib/json-ld";
 import { labelBreadcrumbsJsonLd, recordLabelJsonLd } from "@/lib/log-schema";
 import { bioMetaDescription } from "@/lib/meta-description";
 import { albumCoverAtSize } from "@/lib/media";
-import { type CatalogueSort, flattenArtistGroups, parseCatalogueSort } from "@/lib/catalogue";
+import {
+  CATALOGUE_SORT_DEFAULT,
+  type CatalogueSort,
+  cataloguePageHref,
+  flattenArtistGroups,
+  parseCatalogueSort,
+} from "@/lib/catalogue";
 import { type LabelPageData } from "./-label-page-data";
 
 // The label page — one label's place in the archive, and the third node of the graph
@@ -300,7 +306,9 @@ function LabelPage() {
             <CatalogueArtistGroups groups={catalogue.groups} labelName={name} />
 
             <CataloguePager
-              buildHref={(page) => `/label/${slug}?sort=${sort}&page=${page}`}
+              buildHref={(page) =>
+                cataloguePageHref(`/label/${slug}`, page, sort, CATALOGUE_SORT_DEFAULT)
+              }
               label={`Artists on ${name}, more pages`}
               page={catalogue.page}
               pageCount={catalogue.pageCount}
