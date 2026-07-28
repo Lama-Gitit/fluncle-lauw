@@ -32,6 +32,8 @@ export function getRouter() {
 }
 
 declare module "@tanstack/react-router" {
+  // Must stay an `interface`: TanStack's Register is filled in via declaration merging,
+  // which only interfaces support — a `type` alias here would shadow instead of merge.
   // oxlint-disable-next-line typescript/consistent-type-definitions
   interface Register {
     router: ReturnType<typeof getRouter>;

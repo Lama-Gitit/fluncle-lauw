@@ -89,7 +89,6 @@ export const GalaxyOg: React.FC = () => {
         {STARS.map((star, index) => (
           <div
             // The starfield is fixed and seeded, so index keys are stable.
-            // oxlint-disable-next-line no-array-index-key
             key={index}
             style={{
               backgroundColor: colors.starlightCream,

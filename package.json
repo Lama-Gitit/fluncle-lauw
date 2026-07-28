@@ -55,8 +55,8 @@
     "dev": "turbo run dev",
     "format": "oxfmt --write .",
     "format:check": "oxfmt --check .",
-    "lint": "oxlint --ignore-path .prettierignore --type-aware --deny-warnings",
-    "lint:fix": "oxlint --fix --ignore-path .prettierignore --type-aware --deny-warnings",
+    "lint": "oxlint --ignore-path .prettierignore --type-aware --deny-warnings --report-unused-disable-directives",
+    "lint:fix": "oxlint --fix --ignore-path .prettierignore --type-aware --deny-warnings --report-unused-disable-directives",
     "skills:install": "bun run scripts/install-skills.ts",
     "stories:build": "bun scripts/build-user-story-matrix.ts",
     "social:preview": "bun run --cwd packages/video social:preview",
@@ -80,7 +80,7 @@
   },
   "lint-staged": {
     "*": [
-      "oxlint --fix --ignore-path .prettierignore --no-error-on-unmatched-pattern",
+      "oxlint --fix --ignore-path .prettierignore --no-error-on-unmatched-pattern --deny-warnings",
       "oxfmt --write --ignore-path .prettierignore --no-error-on-unmatched-pattern"
     ]
   },

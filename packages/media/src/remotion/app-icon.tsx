@@ -184,7 +184,6 @@ const Starfield: React.FC<{ stars: Star[] }> = ({ stars }) => (
     {stars.map((star, index) => (
       <div
         // Deterministic seeded field — stable index keys.
-        // oxlint-disable-next-line no-array-index-key
         key={index}
         style={{
           backgroundColor: colors.starlightCream,
@@ -206,7 +205,6 @@ const Corona: React.FC<{ embers: Ember[] }> = ({ embers }) => (
     {embers.map((ember, index) => (
       <div
         // Deterministic seeded corona — stable index keys.
-        // oxlint-disable-next-line no-array-index-key
         key={index}
         style={{
           backgroundColor: ember.color,
@@ -485,7 +483,6 @@ const StampVariant: React.FC = () => {
       ].map(([left, top], index) => (
         <div
           // Fixed four corners — stable index keys.
-          // oxlint-disable-next-line no-array-index-key
           key={index}
           style={{
             height: tick,
@@ -615,7 +612,6 @@ const CoverVariant: React.FC = () => {
             return (
               <div
                 // Fixed seeded skyline — stable index keys.
-                // oxlint-disable-next-line no-array-index-key
                 key={index}
                 style={{
                   background: colors.sleeveBlack,

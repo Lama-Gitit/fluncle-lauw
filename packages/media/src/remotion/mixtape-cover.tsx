@@ -102,7 +102,6 @@ export const MixtapeCover: React.FC<MixtapeCoverProps> = ({
         {stars.map((star, index) => (
           <div
             // deterministic seeded field; stable index keys
-            // oxlint-disable-next-line no-array-index-key
             key={index}
             style={{
               backgroundColor: colors.starlightCream,

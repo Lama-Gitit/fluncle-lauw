@@ -272,7 +272,6 @@ function RadioCaptions({
                 : "radio-narration-word"
             }
             // The script is a fixed, ordered word list; index is a stable key here.
-            // oxlint-disable-next-line no-array-index-key
             key={i}
           >
             {word.text}{" "}

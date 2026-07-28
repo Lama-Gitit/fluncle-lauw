@@ -119,8 +119,11 @@ beforeEach(() => {
   execute.mockReset();
   randomSpy.mockReset().mockReturnValue(0);
   execute.mockImplementation(async (query: { sql: string }) => {
-    // Guard the predicate is actually in the SQL, not just emulated by the mock.
+    // Guard the predicate is actually in the SQL, not just emulated by the mock. The mock
+    // only ever runs inside a test body, so these are not standalone expects.
+    // oxlint-disable-next-line vitest/no-standalone-expect
     expect(query.sql).toContain("video_squared_at is not null");
+    // oxlint-disable-next-line vitest/no-standalone-expect
     expect(query.sql).toContain("observation_audio_url is not null");
 
     return { rows: runEligibleQuery() };

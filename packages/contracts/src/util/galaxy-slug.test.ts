@@ -101,5 +101,4 @@ const SLUG_SHAPE = /^[a-z]+(-[a-z]+){2}$/;
   assert.equal(slugify("!!!"), "");
 }
 
-// eslint-disable-next-line no-console
 console.log("galaxy-slug.test.ts: all checks passed");

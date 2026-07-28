@@ -1,4 +1,10 @@
 {
   "$schema": "./node_modules/oxfmt/configuration_schema.json",
-  "ignorePatterns": []
+  "ignorePatterns": [
+    // Raycast formatting is owned by Prettier via `ray lint` (AGENTS.md "Commands") — oxfmt
+    // and Prettier genuinely disagree on these files. Kept HERE rather than .prettierignore
+    // so the exemption stays formatting-only: .prettierignore doubles as oxlint's ignore
+    // path, and parking this glob there silently exempted Raycast from LINTING too.
+    "apps/raycast/src/**"
+  ]
 }

@@ -576,7 +576,6 @@ const useTextureImages = (textures: Record<string, string> | undefined): LoadedT
       // Release the delay if this set is torn down before it finished loading.
       continueRender(handle);
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- keyed on content, not identity
   }, [key]);
 
   return loaded;

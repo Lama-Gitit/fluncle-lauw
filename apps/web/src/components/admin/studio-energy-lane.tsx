@@ -275,7 +275,6 @@ export function StudioEnergyLane({
           <span
             className="studio-region studio-region-suggestion"
             // Suggestions are positional ghosts off the same ordered envelope list.
-            // oxlint-disable-next-line no-array-index-key
             key={`suggestion-${index}`}
             style={{
               left: `${region.leftFraction * 100}%`,

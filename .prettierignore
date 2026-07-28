@@ -1,9 +1,9 @@
 .agents/skills/**
-node_modules/**
-dist/**
-build/**
+**/node_modules/**
+**/dist/**
+**/build/**
 **/.output/**
-.turbo/**
+**/.turbo/**
 apps/raycast/raycast-env.d.ts
-apps/raycast/src/**
 apps/web/src/routeTree.gen.ts
+apps/web/worker-configuration.d.ts

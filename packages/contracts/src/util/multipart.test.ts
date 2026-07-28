@@ -96,5 +96,4 @@ import {
   assert.equal(buildCompleteXml([]), "<CompleteMultipartUpload></CompleteMultipartUpload>");
 }
 
-// eslint-disable-next-line no-console
 console.log("multipart.test.ts: all checks passed");

@@ -598,7 +598,6 @@ function frame(): void {
     const m = monitor.push(nowMs, mean[0], mean[1], mean[2]);
     if (m.tripped) {
       outputTripCooldown = 90; // ~1.5s of forced holding
-      // eslint-disable-next-line no-console
       console.warn(
         `[flash] output-side trip at ${nowMs.toFixed(0)}ms (general ${m.general}, red ${m.red}) → holding`,
       );
@@ -656,7 +655,6 @@ function frame(): void {
   // folded, by max, with the scripted arc + any live reveal — so the crest always shows.
   if (dropDetector.observe(nowMs, a.energy)) {
     dropEnv.fireReveal(nowMs);
-    // eslint-disable-next-line no-console
     console.warn(`[drop] detector fired at ${nowMs.toFixed(0)}ms → reveal`);
   }
   lastDropValue = dropEnv.value(nowMs, a.drop * settle);
@@ -711,7 +709,6 @@ function frame(): void {
     traceLastMs = nowMs;
     const ls = limiter.status(nowMs);
     const it0 = pipeline.debugIntegrators()[0] ?? null;
-    // eslint-disable-next-line no-console
     console.log(
       "[trace] " +
         JSON.stringify({
@@ -826,7 +823,6 @@ async function loadPlan(): Promise<void> {
     const list = (await res.json()) as PlanItem[];
     PLAN = list || [];
     lastPlanSource = res.headers.get("x-plan-source") === "bridge" ? "bridge" : "local";
-    // eslint-disable-next-line no-console
     console.log(
       lastPlanSource === "bridge"
         ? `plan: ${PLAN.length} findings via the bridge`

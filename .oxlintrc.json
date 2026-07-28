@@ -6,9 +6,10 @@
     "**/dist/**",
     "**/.output/**",
     "**/build/**",
-    "apps/web/src/routeTree.gen.ts"
+    "apps/web/src/routeTree.gen.ts",
+    "apps/web/worker-configuration.d.ts"
   ],
-  "plugins": ["eslint", "import", "oxc", "react", "typescript", "unicorn"],
+  "plugins": ["eslint", "import", "oxc", "react", "typescript", "unicorn", "vitest"],
   "rules": {
     "curly": "error",
     "eslint/sort-keys": "error",
@@ -28,6 +29,17 @@
         "case": "kebabCase"
       }
     ],
-    "unicorn/no-null": "off"
+    "unicorn/no-null": "off",
+    // vitest plugin: the prize is no-focused-tests — a committed `.only` silently guts the
+    // suite the deploy gate rests on. The four "off" rules are tuned out deliberately:
+    // require-mock-type-parameters (486 pre-existing, stylistic), no-conditional-expect +
+    // expect-expect (this repo asserts through guard branches and helpers), and
+    // require-to-throw-message (stylistic). valid-expect keeps vitest's 2-arg
+    // `expect(actual, message)` form legal.
+    "vitest/expect-expect": "off",
+    "vitest/no-conditional-expect": "off",
+    "vitest/require-mock-type-parameters": "off",
+    "vitest/require-to-throw-message": "off",
+    "vitest/valid-expect": ["error", { "maxArgs": 2 }]
   }
 }

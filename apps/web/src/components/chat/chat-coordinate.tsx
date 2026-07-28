@@ -197,11 +197,9 @@ export function linkifyCoordinates(
     segment.kind === "text" ? (
       segment.text
     ) : segment.mixtape ? (
-      // oxlint-disable-next-line no-array-index-key -- static split of one string, never reordered
       <CoordinateAnchor key={index} logId={segment.logId} />
     ) : (
       <ChatCoordinate
-        // oxlint-disable-next-line no-array-index-key -- static split of one string, never reordered
         key={index}
         finding={findingsByLogId.get(segment.logId)}
         logId={segment.logId}

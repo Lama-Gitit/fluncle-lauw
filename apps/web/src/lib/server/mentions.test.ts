@@ -78,6 +78,7 @@ describe("parseMentionHandle", () => {
   ];
 
   for (const { name, url, expected } of cases) {
+    // oxlint-disable-next-line vitest/valid-title -- parameterized: `name` is a string from the typed cases table
     it(name, () => {
       expect(parseMentionHandle(url)).toBe(expected);
     });
