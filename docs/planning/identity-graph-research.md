@@ -133,3 +133,24 @@ from tracks group by 1, 2;
 ## Monetization/tax facts (if posture B/C is ever revisited)
 
 Stripe EEA: 1.5% + €0.25 card fee + 0.7% Billing (a €5 sub nets ≈ €4.64; the €0.25 fixed component is why nobody bills per-call at small volume); MoR (Paddle/Polar) ≈ 5% + $0.50 and takes the VAT liability as reseller. NL/EU: the €10,000 cross-border B2C threshold (not the €20,000 KOR) is the cliff; quarterly OSS; **UK has no threshold for a non-established seller — one UK B2C sale triggers registration**; 10-year record retention; Art. 24b evidence must come from a third party (the PSP), not a self-declared address; KVK €85.15 mandatory for profit-seeking supply. Comparable solo APIs price at $17–$49 entry, gate free tiers per-month; the niche's metadata APIs gate on **rate, not quota** (free keys buy 2.4–6×). Working solo-API accounts range "unimaginably tough" (ScreenshotOne, ~$20k MRR) to "an hour a year" (Zestful, ~$200/mo — the structural analogue of a cached resolver). No first-party free→paid conversion figure exists anywhere in the research.
+
+## Unit 0 — RESULTS (run against hosted prod `fluncle`, 2026-07-29, operator interview session)
+
+**Verdict: GO** — 8,341 rows with ≥2 platform links (8,256 catalogue + 85 certified) against the pre-stated 2,000 threshold.
+
+| Measure                  | Certified (85 rows) | Catalogue (65,249–65,260 rows)                                                              |
+| ------------------------ | ------------------- | ------------------------------------------------------------------------------------------- |
+| ISRC                     | 85 (100%)           | 33,853 (52%)                                                                                |
+| Spotify anchored         | 85 (100%)           | 20,271 (31%)                                                                                |
+| Spotify tried-and-missed | 0                   | 8,778                                                                                       |
+| Spotify never tried      | 0                   | 36,200                                                                                      |
+| Spotify retired at cap   | 0                   | 0                                                                                           |
+| Apple Music              | 84 (99%)            | **0 — all 65,260 never attempted** (the catalogue sweep leg exists but was never scheduled) |
+| Discogs release id       | 35 (41%)            | 37,575 (58%)                                                                                |
+| MBID                     | 53 (62%)            | 65,240 (~100%, crawler PK)                                                                  |
+
+Platform breadth among ISRC-bearing rows: certified — 51 rows at 2 platforms, 34 at 3; catalogue — 8,836 at 0, 16,772 at 1, 8,256 at 2, none at 3 (Apple absent). ISRC collisions: 33,004 ISRCs unique, 459 shared by 2 rows, 9 by 3 (~1.4% of ISRCs — arrays required; 5× rarer than the external ~8% estimate). Birth-path (Q5): crawler rows 65,247 all MBID-bearing; spotify-born 78 certified (46 with MBID, 59%) + 20 catalogue (0 MBID). Entities (Q4): artists 9,364 (80% MBID, 49% Spotify, 3% Wikidata); albums 9,395 (99% MBID, 20 Apple album ids, 20 UPC); labels 1,233 (99% MBID). Q1's plan confirmed `SCAN tracks USING COVERING INDEX tracks_funnel_scan_idx`; Q2 (uncovered) completed in ~4.8s wall including network — a one-off cost, never a live op.
+
+## The operator rulings (2026-07-29 interview) — recorded here for provenance
+
+(1) Unlit confirmed — uncertified rows served, certified boolean the only tier carrier. (2) Artifact = reader page + `get_track` keyed extension; no standalone endpoint; no nightly dump for now (trigger: a real consumer, likely label outreach). (3) Posture A free; the links-map free-commitment is contract-scoped (Spotify V.5); Fluncle's own analysis stays monetizable later. (4) Pre-overhaul, build now. (5) No retirement trigger (nothing accretes standing cost). (6) Wrong-answer channel = hey@fluncle.com. (7) The Spotify hop served EVERYWHERE (stored raw, served `/out/spotify/<fluncleTrackId>`), carve-outs: JSON-LD/sameAs stays raw; the iOS app resolves the hop to preserve instant app-open. (8) Dials: 30/min/IP + 1,000/day/IP on the identity lookups. Interview addition: the Apple catalogue backfill cron leg is enabled (the biggest idle coverage lever — 33,853 ISRC-bearing rows to try).
