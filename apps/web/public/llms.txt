@@ -79,6 +79,8 @@ Each page leads with the findings Fluncle has logged there. An artist, label, or
 ## Tools
 
 - [CLI installer](https://www.fluncle.com/cli/latest.sh): curl -fsSL https://www.fluncle.com/cli/latest.sh | sh, then try fluncle recent
+- [Fluncle for iOS](https://apps.apple.com/app/id6790080540): the native app carrying the feed, the archive, the radio, and each finding's /log screen, with push when a new banger lands
+- [Fluncle Lens](https://chromewebstore.google.com/detail/efkkceaofendabikblfjhoepgejfpakk): a Chrome extension that finds fluncle:// coordinates on any web page and links each to its /log finding
 - The rave terminal: ssh rave.fluncle.com, the deep end of the Galaxy
 - Findings over DNS: dig random.dig.fluncle.com TXT +short returns a finding as a TXT record (try latest, or any coordinate like 004.7.2I)
 
