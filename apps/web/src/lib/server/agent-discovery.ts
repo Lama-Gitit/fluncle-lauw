@@ -371,6 +371,7 @@ ${tracks.join("\n")}
 
 - [CLI installer](${siteUrl}/cli/latest.sh): curl -fsSL ${siteUrl}/cli/latest.sh | sh, then try fluncle recent
 - [Fluncle Lens](https://chromewebstore.google.com/detail/efkkceaofendabikblfjhoepgejfpakk): a Chrome extension that finds fluncle:// coordinates on any web page and links each to its /log finding
+- [Fluncle for iOS](https://apps.apple.com/app/id6790080540): the native app carrying the feed, the archive, the radio, and each finding's /log screen, with push when a new banger lands
 - The rave terminal: ssh rave.fluncle.com, the deep end of the Galaxy
 `;
 

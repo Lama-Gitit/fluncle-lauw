@@ -171,6 +171,14 @@ Listings on a third-party store, not pages we host. Their uptime is the store's,
 | ---------------- | ------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | --------- |
 | `extension.lens` | `chromewebstore.google.com/detail/efkkceaofendabikblfjhoepgejfpakk` | Fluncle Lens — the Chrome extension that finds `fluncle://` coordinates on any page and links each to its `/log/<coord>` finding (with a hover card from the public API) | secondary |
 
+### Native apps — vendor-store surfaces
+
+Same posture as the extensions: a listing on a third-party store, so no `/status` probe (the store's uptime is theirs, and a bare GET would bot-block into a false "down").
+
+| Surface   | Store URL                         | Exposes                                                                                                                                                                                                                       | Weight    |
+| --------- | --------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------- |
+| `app.ios` | `apps.apple.com/app/id6790080540` | Fluncle for iOS (`apps/mobile`) — the archive as a native app: the Feed, the Archive, the Decks, the Radio, and the Mixtapes, each finding opening its own `/log` screen, plus a submit door and push when a new banger lands | secondary |
+
 ### Crons — the on-box Hermes scheduled jobs
 
 Checked by their last-run freshness (not an HTTP hit), so they carry a `cronName` + cadence instead of a URL probe.
@@ -327,6 +335,7 @@ The weight ladder within a context is unchanged — **`primary`** (the loud fron
 | `cli.status`                |           |           | tertiary  |           |
 | `cli.admin`                 |           |           | hidden    |           |
 | `extension.lens`            | secondary |           |           |           |
+| `app.ios`                   | secondary |           |           |           |
 | `cron.newsletter`           |           |           |           | secondary |
 | `cron.enrich`               |           |           |           | hidden    |
 | `cron.cluster`              |           |           |           | hidden    |
@@ -376,9 +385,9 @@ A surface is operator/agent-only where its only display weight is `hidden` (`cli
 
 `hidden` and `pending` are different shapes of "not loud." A `hidden` weight is a **live** surface that one context deliberately doesn't headline (it still probes, still serves, still answers). A surface marked **`pending: true`** is **not live at all yet**: registered (so it is reviewed and one field-flip away) but **DARK everywhere** — `liveSurfaces()` drops it, so every selector (`surfacesForContext`, `surfacesByWeight`, `surfacesByKind`, `statusProbes`, `cronSurfaces`) and every raw-catalog consumer that reads `liveSurfaces()` (the MCP `get_status` labels, the CLI status labels) skips it. It carries no `/status` probe and no service label, and it stays out of the §2/§3 tables (the parity test skips a `pending` surface) and off the hand-wired menus and crawler maps until it goes live.
 
-Four surfaces sit `pending` today, each naming its own flip in an inline comment: **`web.mix`** (the mixability engine's door, dark until the archive's own depth measurement opens it to the world), **`web.chat`** and **`web.recommendations`** (the two crew doors — both live and 200 for anyone, but gated to the verified crew while their rollouts run as learning cohorts, so advertising them would point most readers at a door they cannot open yet), and **`app.ios`** — Fluncle for iOS (`apps/mobile`), the first entry of the `app` kind, resubmitted to App Store review on 2026-07-21 after the Guideline 5.2.3 remediation and dark until it clears. Adding the §2/§3 rows is part of each flip, never before it.
+Three surfaces sit `pending` today, each naming its own flip in an inline comment: **`web.mix`** (the mixability engine's door, dark until the archive's own depth measurement opens it to the world), and **`web.chat`** and **`web.recommendations`** (the two crew doors — both live and 200 for anyone, but gated to the verified crew while their rollouts run as learning cohorts, so advertising them would point most readers at a door they cannot open yet). Adding the §2/§3 rows is part of each flip, never before it.
 
-Use it to land a surface **ahead of an external gate** so the post-approval fan-out is a single, reviewed, no-other-edits flip. **Fluncle Lens** (`extension.lens`, the `apps/extension` Chrome extension) was the first such entry: it sat `pending: true` through Chrome Web Store review, then went **live on 2026-06-29** by exactly this flip — drop `pending`, swap the placeholder `url` for the store's assigned listing URL (`chromewebstore.google.com/detail/efkkceaofendabikblfjhoepgejfpakk`), and add its §2/§3 rows — and the menus, the dev-row, and the MCP + CLI status labels lit up at once. (A vendor store listing is not one of our own health-probeable endpoints, so it carries no `probeConfig`.)
+Use it to land a surface **ahead of an external gate** so the post-approval fan-out is a single, reviewed, no-other-edits flip. **Fluncle Lens** (`extension.lens`, the `apps/extension` Chrome extension) was the first such entry: it sat `pending: true` through Chrome Web Store review, then went **live on 2026-06-29** by exactly this flip — drop `pending`, swap the placeholder `url` for the store's assigned listing URL (`chromewebstore.google.com/detail/efkkceaofendabikblfjhoepgejfpakk`), and add its §2/§3 rows — and the menus, the dev-row, and the MCP + CLI status labels lit up at once. **Fluncle for iOS** (`app.ios`, `apps/mobile`) proved it again one kind over: pre-staged through two App Store review rounds, approved 2026-07-29, flipped live by the same three moves (`apps.apple.com/app/id6790080540`). (A vendor store listing is not one of our own health-probeable endpoints, so it carries no `probeConfig`.)
 
 ## 4. Adding a surface — the checklist
 

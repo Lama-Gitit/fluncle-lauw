@@ -54,6 +54,11 @@ export const radioUrl = "https://radio.fluncle.com";
 export const chromeExtensionUrl =
   "https://chromewebstore.google.com/detail/efkkceaofendabikblfjhoepgejfpakk";
 
+// Fluncle for iOS (apps/mobile): the archive as a native app — the feed, the
+// radio, the mixtapes, each finding's own log screen. Live on the App Store;
+// the canonical listing is @fluncle/registry `app.ios`.
+export const appStoreUrl = "https://apps.apple.com/app/id6790080540";
+
 // The Tor onion: an onionspray mirror of www.fluncle.com, so it carries the
 // same archive plus the API, RSS, and MCP — off the grid, still in the Galaxy.
 // Tor Browser advertises it via the Onion-Location pill; this is the on-site

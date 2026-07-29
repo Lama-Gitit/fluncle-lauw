@@ -1,5 +1,6 @@
 import { Link, createFileRoute } from "@tanstack/react-router";
 import {
+  appStoreUrl,
   chromeExtensionUrl,
   fluncleEntityId,
   fluncleSameAs,
@@ -190,6 +191,14 @@ function AboutPage() {
             browser, spots them on any page and walks you back to the finding.{" "}
             <a href={chromeExtensionUrl} rel="noreferrer">
               Get the Chrome extension
+            </a>
+            .
+          </p>
+          <p>
+            And the archive rides in your pocket now: Fluncle for iOS carries the feed, the radio,
+            the mixtapes, and every finding&apos;s own log screen.{" "}
+            <a href={appStoreUrl} rel="noreferrer">
+              Get the iOS app
             </a>
             .
           </p>

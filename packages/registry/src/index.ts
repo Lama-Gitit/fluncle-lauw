@@ -1315,21 +1315,17 @@ export const SURFACES: readonly Surface[] = [
     ],
     kind: "app",
     name: "app.ios",
-    // DARK until App Store review clears (the extension.lens pre-stage flow, one kind over).
-    // Submitted, rejected on Guideline 5.2.3 (access to third-party audio/video), and
-    // RESUBMITTED 2026-07-21 with the feed videos muted + the review note in
-    // apps/mobile/docs/app-review-note.md. PRE-STAGED so the post-approval fan-out is one
-    // field-flip:
-    //   1. drop `pending: true` (or set it false),
-    //   2. swap `url` for the assigned listing URL (https://apps.apple.com/app/id<assigned-id>),
-    //   3. add the §2/§3 doctrine rows (it is now a live web surface).
-    // No other consumer needs touching — the menus, the MCP + CLI status labels, and the
-    // doctrine all read the catalog. The placeholder `url` is the App Store search for the
-    // listing. Source: apps/mobile (Expo / expo-router, bundle id com.fluncle.app).
+    // LIVE on the App Store (approved 2026-07-29 after two review rounds: Guideline 5.2.3
+    // remediated in-binary, then a 5.2.1 screenshot objection answered by the operator).
+    // Pre-staged `pending: true` through review (the extension.lens flow, one kind over) and
+    // flipped by exactly the planned one-field flip: `pending` dropped, the placeholder
+    // search URL swapped for the assigned listing, the §2/§3 doctrine rows added. No
+    // probeConfig — a vendor store listing is not one of our own health-probeable endpoints
+    // (the extension.lens ruling). Source: apps/mobile (Expo / expo-router, bundle id
+    // com.fluncle.app, ascAppId 6790080540 in apps/mobile/eas.json).
     operatorNotes:
-      "Fluncle for iOS (apps/mobile). PENDING App Store review — DARK until approval, then flip `pending` + set the assigned listing URL. No probeConfig: a vendor store listing is not one of our own health-probeable endpoints (the box prober walks web/r2/dns/ssh + the crons, never an external GET), and Apple would bot-block or redirect a bare GET and read back as a false 'down' — the extension.lens ruling, which dropped its probeConfig on going live for the same reason.",
-    pending: true,
-    url: "https://apps.apple.com/search?term=fluncle",
+      "Fluncle for iOS (apps/mobile), LIVE on the App Store (approved 2026-07-29). Store listing reachability is Apple's, not ours, so it is not on the /status board — the extension.lens ruling: a vendor store would bot-block or redirect a bare GET and read back as a false 'down'.",
+    url: "https://apps.apple.com/app/id6790080540",
     weights: { web: "secondary" },
   },
   // NB: there is deliberately NO surface for the Raycast extension (apps/raycast). Unlike

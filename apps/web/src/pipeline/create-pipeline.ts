@@ -339,6 +339,12 @@ const K: Kiosk[] = [
     url: "https://chromewebstore.google.com/detail/efkkceaofendabikblfjhoepgejfpakk",
     wh: "extension",
   },
+  {
+    label: "App",
+    tint: "#6bb0ff",
+    url: "https://apps.apple.com/app/id6790080540",
+    wh: "iOS",
+  },
 ];
 
 // the mixtape dream-tail (Fluncle dreaming); +2 cols to sit in the shifted galaxy
