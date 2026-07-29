@@ -1,0 +1,135 @@
+# Identity graph — research evidence (2026-07-29)
+
+Companion to [docs/dnb-identity-graph-rfc.md](../dnb-identity-graph-rfc.md). Non-canonical planning input: the measured numbers, queries, and clauses the RFC's claims rest on, committed so the evidence outlives the session that gathered it (four research threads + two sub-verifications + a four-role adversarial panel, all 2026-07-29). Anything below not re-verifiable from this file or the cited primary source should be treated as UNVERIFIED before it carries a new decision.
+
+## The market facts (all verified at primary sources, 2026-07-29)
+
+- **Odesli/Songlink public API sunsets 2026-07-31** — Linktree Help Center, published 2026-05-21: `v1-alpha.1` on `api.song.link`/`api.odesli.co` returns `410 Gone` after that date; allowlist-only for partners; **no paid tier offered**; the consumer landing pages survive. Pre-sunset state, measured live: ~19 keyless requests per IP per day then hard 429 for the rest of the day; **the big-three bridge is already gone in every direction** (Spotify-in → no Apple/YouTube; Apple-in → no Spotify/YouTube; YouTube-in → own cluster only; 6/6 canonical tracks, API and free HTML pages both). Odesli never accepted an ISRC as input.
+- **The read on Linktree's choice:** nine years running the canonical resolver, then switched off rather than charged — an incumbent's verdict that the API is a cost centre, not a product.
+- **The paid successor exists:** Musicfetch — $50/50k, $100/150k, $200/500k req/mo, card-gated trial, no perpetual free tier, search by URL/ISRC/UPC across 40+ services including Apple Music and YouTube. No revenue/headcount/funding signal found for it or any small entrant (a price page is not revenue).
+- **Demand measures tiny:** Stack Overflow empty on the sunset; HN never noticed; one ~10-upvote Reddit thread; ~80 GitHub repos reference the API; the best-funded SDK moves ~493 npm installs/week; measured indie willingness-to-pay ≈ 0 ("€0.01 per track, ouch" → build-my-own-cache). GitHub growth-curve signals in this niche are polluted by AI-agent-generated repos — filter before trusting.
+- **Nobody prices on coverage.** Odesli: free, both tiers. Soundcharts $50–$4,500/mo by request volume; Viberate €300–€5,000 by throughput/depth; MetaBrainz $100–$2,000+/mo **by buyer headcount/stage**; AudD $5/1k sliding. Largest coverage claims: 100–160M tracks against Luminate's 253M streaming universe (40–63%); no vendor publishes a coverage percentage anywhere. The scope-fit thesis: partial coverage sells only where the vendor's scope is the buyer's entire universe (Apple←Primephonic classical; Beatport's ~5.5% slice into DJ hardware). No vendor markets underground/white-label coverage as an axis — unserved gap or too-small market, undecidable from the evidence.
+- **Cautionary tales:** Echo Nest (partial-catalogue data business, licensed to the era's biggest DSPs, acquired by Spotify 2014, third-party market evaporated within a week); Jaxsta (best-positioned credits database, hibernated); WhoSampled ≤£632k turnover; MetaBrainz itself net −$46,726.
+- **DnB-specific measurements:** a real DnB sample on MusicBrainz carries ISRCs at ~68% but URL-relations at only ~15% (the hole Fluncle's verified links fill); **~8% of DnB ISRCs map to more than one recording**; Deezer's unauthenticated `/track/isrc:` endpoint resolved 27/27 with ~7% silent title mismatches (it picks a winner silently — the anti-pattern); Apple's keyless iTunes lookup returns 0 for ISRC always. RollDaBeats (~100k-track DnB discography) is dead and unarchived 3y8m, ownerless.
+
+## The platform-terms clauses (load-bearing, verbatim where retrieved)
+
+- **Spotify Developer Policy II.4.c:** "You must not offer metadata, cover art, and/or Audio Preview Clips as a **standalone service or product**." Developer Terms V.5: "You will not sell any Spotify Content or other data obtained from Spotify." IV.3.1: "you may not store, aggregate or create compilations or databases of Spotify Content, other than as strictly necessary… Do not store Spotify Content indefinitely." IV.2.4: no robot/spider retrieval. III.14: no ML/AI ingestion. II.4.a/b: marks attribution + link-back. **The panel's correction: "standalone" is a structural clause, not a price test — free does not cure it**; and the contract binds Fluncle as a Spotify developer regardless of where any particular ID was sourced (MusicBrainz CC0 provenance defeats the copyright question, not the contract one).
+- **Spotify Feb-2026 lockdown** (developer.spotify.com migration guide + 2026-02-06 blog): `external_ids` (ISRC) removed from dev-mode track objects; batch endpoints and `available_markets`/`label`/`popularity` removed; search capped; Extended Quota requires a registered business + 250k MAU (recorded in-repo as unreachable). Four restrictions in twenty months.
+- **Deezer Developer Terms §IV:** use is "strictly limited for a non-commercial purpose and in a non-commercial environment"; the developer "shall not perceive, receive, generate, benefit or create directly or indirectly, any moneys, incomes, revenues, **data** or any other consideration." Note: Fluncle's Deezer calls are unauthenticated (no accepted key agreement — cuts both ways). The ISRC-recovery rung's exposure exists today, independent of the RFC.
+- **Tidal Developer Terms** (via search snippets — **portal must be read verbatim before any Tidal leg**): temporary caching only; no business-targeted products; no distribution to non-subscribers.
+- **Apple:** the controlling MusicKit clause is **ADPLA §3.3.6(D) — NOT RETRIEVED** (PDF fetch declined). Blocking for any third-party serving of Apple links; first-party rendering continues as today.
+- **MusicBrainz/MetaBrainz:** core data (recordings, relationships & URLs, labels, artists, releases) is **CC0**; supplementary data CC BY-NC-SA; the hosted API asks 1 req/s + identifying UA (Fluncle complies) and "non-commercial use of this web service is free; see our commercial plans" — "commercial" includes an _expected_ revenue stream; Bronze $100/mo. Live Data Feed replication packets are CC BY-NC-SA (a supporter agreement, not just the licence, if replication is ever proposed).
+
+## The measurement queries (run against HOSTED prod, never turso dev)
+
+**Q0 — physical column order** (decides whether Q1/Q2 are covered; `embedding_blob` sits at cid 28 of 62 and post-blob arms drag 4KB overflow pages):
+
+```sql
+select cid, name from pragma_table_info('tracks');
+```
+
+**Q1 — ISRC + Spotify by tier** (expect `SCAN tracks USING COVERING INDEX tracks_funnel_scan_idx`; run `EXPLAIN QUERY PLAN` first):
+
+```sql
+select
+  is_catalogue,
+  count(*) as rows_total,
+  sum(case when isrc is not null and trim(isrc) <> '' then 1 else 0 end) as has_isrc,
+  sum(case when spotify_uri is not null then 1 else 0 end) as has_spotify,
+  sum(case when isrc is not null and trim(isrc) <> '' and spotify_uri is not null then 1 else 0 end) as has_both,
+  sum(case when spotify_uri is null and spotify_anchor_attempted_at is not null then 1 else 0 end) as spotify_tried_missed,
+  sum(case when spotify_uri is null and spotify_anchor_attempted_at is null then 1 else 0 end) as spotify_never_tried,
+  sum(case when spotify_uri is null and coalesce(spotify_anchor_attempts, 0) >= 6 then 1 else 0 end) as spotify_retired_at_cap
+from tracks group by is_catalogue;
+```
+
+**Q2 — Apple + MBID + Discogs** (uncovered; time it — the duration is itself a baseline figure):
+
+```sql
+select
+  is_catalogue,
+  count(*) as rows_total,
+  sum(case when apple_music_url is not null then 1 else 0 end) as has_apple,
+  sum(case when apple_music_url is null and backfill_apple_music_attempted_at is not null then 1 else 0 end) as apple_tried_missed,
+  sum(case when apple_music_url is null and backfill_apple_music_attempted_at is null then 1 else 0 end) as apple_never_tried,
+  sum(case when backfill_apple_music_done_at is not null then 1 else 0 end) as apple_done,
+  sum(case when mb_recording_id is not null then 1 else 0 end) as has_mbid,
+  sum(case when mb_recording_id is null and mb_recording_id_attempted_at is not null then 1 else 0 end) as mbid_tried_missed,
+  sum(case when mb_recording_id is null and mb_recording_id_attempted_at is null then 1 else 0 end) as mbid_never_tried,
+  sum(case when in_release_id is not null then 1 else 0 end) as has_discogs_release
+from tracks group by is_catalogue;
+```
+
+**Q3 — platform breadth + ISRC collisions** (the RFC's go/no-go reads off the breadth half):
+
+```sql
+select is_catalogue,
+       (case when spotify_uri is not null then 1 else 0 end)
+     + (case when apple_music_url is not null then 1 else 0 end)
+     + (case when in_release_id is not null then 1 else 0 end) as platforms,
+       count(*) as n
+from tracks
+where isrc is not null and trim(isrc) <> ''
+group by is_catalogue, platforms order by is_catalogue, platforms;
+
+select dupes, count(*) as isrcs from (
+  select isrc, count(*) as dupes from tracks
+  where isrc is not null and trim(isrc) <> '' group by isrc
+) group by dupes order by dupes;
+```
+
+**Q4 — entity-grain coverage:**
+
+```sql
+select 'artists' as entity, count(*) as n,
+       sum(case when mbid is not null then 1 else 0 end) as has_mbid,
+       sum(case when spotify_artist_id is not null then 1 else 0 end) as has_spotify,
+       sum(case when discogs_url is not null then 1 else 0 end) as has_discogs,
+       sum(case when wikidata_qid is not null then 1 else 0 end) as has_wikidata
+from artists
+union all
+select 'albums', count(*),
+       sum(case when release_group_mbid is not null then 1 else 0 end),
+       sum(case when apple_album_id is not null then 1 else 0 end),
+       sum(case when upc is not null then 1 else 0 end), 0
+from albums
+union all
+select 'labels', count(*),
+       sum(case when mb_label_id is not null then 1 else 0 end),
+       sum(case when discogs_label_id is not null then 1 else 0 end), 0, 0
+from labels;
+```
+
+**Q5 — MBID fill by birth path** (panel addition; blocking on the MBID leg — tests whether MBID serves certified rows at all):
+
+```sql
+select case when substr(track_id,1,3)='mb_' then 'crawler' else 'spotify-born' end as birth,
+       is_catalogue,
+       count(*) as rows,
+       sum(case when mb_recording_id is not null then 1 else 0 end) as with_mbid,
+       sum(case when isrc is not null and isrc <> '' then 1 else 0 end) as with_isrc,
+       sum(case when mb_recording_id_attempted_at is not null then 1 else 0 end) as attempted
+from tracks group by 1, 2;
+```
+
+## The panel's load-bearing in-repo verifications (file:line as of `a286d542`-era main)
+
+- `tracks.isrc` non-unique with the reason written down (`schema.ts:~638`); no `isrc_attempted_at` exists; `duplicate_of_track_id` written on exact catalogue↔finding ISRC match (`schema.ts:~290`).
+- No value index on `mb_recording_id` — only the partial fill-queue index (`schema.ts:~660`); MBID is not unique and is not deduped across birth paths.
+- The anchor gate computes and returns (never persists) `source`/`verifiedBy`; the Apify rung bypasses `resolveAnchorFree` and carries the five-member `AnchorReviewSource`; the operator's accepted review writes an anchor with no rung recorded; the subset-fallback gate (±1s, proper-subset credit) is a distinct confidence (`anchor.ts` §§ per the panel reports).
+- `spotify_anchor_attempts` **decrements** on kill-flag requeue (`anchor-apify.ts:~111`) — a budget counter, not a look ledger; `anchorTrack` throws `certified` before any stamp, so certified findings carry NULL anchor state.
+- Apple's `*DoneAt` doctrine makes Apple never-terminal ("re-checkable if Apple's catalogue grows", `schema.ts:~166`); MBID's attempt stamp is single-shot; Deezer's `enrichFromDeezer` returns indistinguishable `{}` on all four failure paths (`deezer.ts:~245-284`) and discards `track.id`.
+- The anchor worklist's five permanent exclusions (`track-work.ts:~119-153`, `schema.ts:~712`): attempts cap, placeholder credits, dismissed, duplicate, no-duration — the `refused` state's predicate, to be shared as one exported SQL fragment.
+- `handleOrpc` returns before the edge-cache block in `server.ts` (~:81 vs ~:126) — no oRPC op is edge-cacheable without opening the dispatch spine; `EdgeCachePolicy.contentType` is a two-member union read by three call sites.
+- `rate_limit_counters` has no prune anywhere in the repo; the dials write 2 rows/req-window; `rateLimitBucket` falls back to a literal `"unknown"` shared bucket when `cf-connecting-ip` is absent.
+- `tracks_funnel_scan_idx` (13 columns, verified from `drizzle/meta/0135_snapshot.json`) does not cover the coverage op's Apple/MBID/backfill arms.
+- The Unlit precedent: six public unauthenticated ops serve title/artists/links for uncertified rows (`PUBLIC_OPERATION_IDS` in `orpc.test.ts:~685`), with the tier-is-a-boolean doctrine written into `_shared.ts` (~:191, :236, :262) and the public `?certified=false` filter documented in `content/docs/api-overview.mdx`.
+- `resolve` verb registered as an external-authority WRITE (`orpc-naming.test.ts:~63`, `naming-conventions.md:~155`); all five live `resolve_*` ops are writes.
+- `/terms` operative clauses: `terms.tsx:51` (self-description), `:65` (the user-side non-commercial licence grant — the launch blocker), `:72` ("reasonable use").
+- `/chat`'s two-dial precedent is user-keyed, `search_archive`'s IP dial is single — no two-dial IP precedent exists.
+- Every in-repo 422 is hand-thrown in-handler; oRPC schema rejection emits 400; the `search_tracks` contract documents the tolerant-input pattern.
+
+## Monetization/tax facts (if posture B/C is ever revisited)
+
+Stripe EEA: 1.5% + €0.25 card fee + 0.7% Billing (a €5 sub nets ≈ €4.64; the €0.25 fixed component is why nobody bills per-call at small volume); MoR (Paddle/Polar) ≈ 5% + $0.50 and takes the VAT liability as reseller. NL/EU: the €10,000 cross-border B2C threshold (not the €20,000 KOR) is the cliff; quarterly OSS; **UK has no threshold for a non-established seller — one UK B2C sale triggers registration**; 10-year record retention; Art. 24b evidence must come from a third party (the PSP), not a self-declared address; KVK €85.15 mandatory for profit-seeking supply. Comparable solo APIs price at $17–$49 entry, gate free tiers per-month; the niche's metadata APIs gate on **rate, not quota** (free keys buy 2.4–6×). Working solo-API accounts range "unimaginably tough" (ScreenshotOne, ~$20k MRR) to "an hour a year" (Zestful, ~$200/mo — the structural analogue of a cached resolver). No first-party free→paid conversion figure exists anywhere in the research.
