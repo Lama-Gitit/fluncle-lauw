@@ -1,0 +1,19 @@
+[Unit]
+Description=fluncle-timer-watchdog — re-arm rave-02 sweep timers left `active` with no next elapse
+Documentation=https://github.com/mauricekleine/fluncle/blob/main/docs/agents/hermes/timer-watchdog/README.md
+Wants=network-online.target docker.service
+After=network-online.target docker.service
+
+[Service]
+Type=oneshot
+# Runs as root: it drives `systemctl start` on the sweep services and reads the Discord
+# webhook off the live container's env via `docker inspect`. Credential-free otherwise.
+ExecStart=/opt/fluncle-timer-watchdog/timer-watchdog.sh
+# A full pass is a handful of `systemctl show` reads plus one re-check sleep; it never
+# waits on a sweep (services are started with --no-block).
+TimeoutStartSec=120
+# Modest hardening for a root systemctl-driving oneshot.
+NoNewPrivileges=true
+ProtectControlGroups=true
+ProtectKernelTunables=true
+RestrictSUIDSGID=true

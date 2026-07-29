@@ -159,6 +159,31 @@ STOPPED_TIMERS=()
 # roster). Removed in restore_sweep_timers, which the EXIT trap already guarantees.
 REBAKE_LOCK=""
 
+# Re-arm ONE timer that came back from the quiesce with no next elapse. These timers fire
+# once on OnBootSec and then ride OnUnitActiveSec, which systemd measures from the
+# SERVICE's last activation — so stopping one BEFORE its one-shot boot fire and starting
+# it again afterwards can leave it with no reference point at all: `active`, yet
+# NextElapse=infinity, never firing again. Persistent=true is what makes that permanent
+# (its stamp file reads as the last trigger, so systemd declines to re-fire the elapsed
+# OnBootSec) — see ../timer-watchdog/README.md for the reproduction. A reboot landing
+# inside this quiesce window did exactly that on 2026-07-28 and killed seven sweeps for
+# 13h with every health signal still green.
+# Activating the service once restores the reference point. --no-block so a long sweep
+# never holds the EXIT trap open; a busy service is skipped (its infinity is just the
+# in-flight tick). Returns 0 only when it actually re-armed something.
+# shellcheck disable=SC2329  # invoked indirectly from the EXIT trap set in quiesce_sweeps
+rearm_stalled_timer() {
+  local timer="$1" service="${1%.timer}.service" mono real
+  mono="$(systemctl show "$timer" -p NextElapseUSecMonotonic --value 2>/dev/null)"
+  real="$(systemctl show "$timer" -p NextElapseUSecRealtime --value 2>/dev/null)"
+  [ "$mono" = "infinity" ] && [ -z "$real" ] || return 1
+  case "$(systemctl show "$service" -p ActiveState --value 2>/dev/null)" in
+    active | activating | reloading | deactivating) return 1 ;;
+  esac
+  systemctl start --no-block "$service" >/dev/null 2>&1 || return 1
+  log "re-armed ${timer} (restored with no next elapse; kicked ${service} once)"
+}
+
 # Restart EXACTLY the timers we stopped, best-effort so one failing start never strands
 # the rest. Runs from the EXIT trap, so it fires on success, on die(), on a build/smoke
 # failure, AND on the rollback path — a failed rebuild must never leave sweeps disabled.
@@ -169,11 +194,19 @@ restore_sweep_timers() {
     REBAKE_LOCK=""
   fi
   [ "${#STOPPED_TIMERS[@]}" -gt 0 ] || return 0
-  local t
+  local t rearmed=0
   for t in "${STOPPED_TIMERS[@]}"; do
     systemctl start "$t" >/dev/null 2>&1 || true
+    # `if` so the common not-stranded return of 1 can never trip `set -e` from the EXIT trap.
+    if rearm_stalled_timer "$t"; then
+      rearmed=$((rearmed + 1))
+    fi
   done
-  log "restored ${#STOPPED_TIMERS[@]} sweep timer(s)"
+  if [ "$rearmed" -gt 0 ]; then
+    log "restored ${#STOPPED_TIMERS[@]} sweep timer(s); re-armed ${rearmed} that came back with no next elapse"
+  else
+    log "restored ${#STOPPED_TIMERS[@]} sweep timer(s)"
+  fi
   STOPPED_TIMERS=()
 }
 

@@ -1,0 +1,15 @@
+[Unit]
+Description=fluncle-timer-watchdog timer — quarter-hourly check that every sweep timer still has a next elapse
+
+[Timer]
+# OnCalendar, NOT OnBootSec+OnUnitActiveSec, and that is the whole point: a calendar timer
+# always carries a realtime next elapse, so the watchdog cannot fall into the same hole it
+# exists to find (a monotonic timer stranded with no reference point — see README). It is
+# also the one form `Persistent=true` actually applies to, so a missed window is caught up.
+OnCalendar=*:0/15
+Persistent=true
+# Keep it off the :00 shoulder where the hourly sweeps all fire at once.
+RandomizedDelaySec=90
+
+[Install]
+WantedBy=timers.target
