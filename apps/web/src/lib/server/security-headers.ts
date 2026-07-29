@@ -133,7 +133,20 @@ export const REPORT_ONLY_CSP = [
   // owned master yet — crawl.ts stores `coverartarchive.org/release/<id>/front-500`),
   // Google avatars, and Simple Analytics' image beacon (its script reports via an
   // <img> GET to queue.*; first watch-window catch, FLUNCLE-WEB-5/6, 2026-07-27).
-  "img-src 'self' data: blob: https://found.fluncle.com https://i.scdn.co https://coverartarchive.org https://lh3.googleusercontent.com https://queue.simpleanalyticscdn.com",
+  //
+  // WHY archive.org rides along with coverartarchive.org, and why naming only the
+  // latter was a BUG rather than a tight policy: a CAA cover URL is a redirect stub.
+  // `coverartarchive.org/release/<id>/front-500` answers 307 → `archive.org/download/…`
+  // → 302 → a per-node `dn<NNNNNN>.ca.archive.org` (measured 2026-07-29 across
+  // samples; the US pool answers as `ia<NNN>.us.archive.org`). CSP re-checks EVERY
+  // redirect hop, so allowing only the stub blocked the image at hop one and reported
+  // it under the stub's own URL — which is exactly why FLUNCLE-WEB-6 kept firing (157
+  // events) against a policy that already listed `coverartarchive.org`. Both forms are
+  // needed: a `*.archive.org` wildcard does not match the bare apex the 307 lands on.
+  // This is a fallback path with a shelf life — `backfill_cover_masters` replaces each
+  // CAA URL with an owned master (docs/album-artwork.md), and these two entries retire
+  // with the last raw one.
+  "img-src 'self' data: blob: https://found.fluncle.com https://i.scdn.co https://coverartarchive.org https://archive.org https://*.archive.org https://lh3.googleusercontent.com https://queue.simpleanalyticscdn.com",
   "media-src 'self' https://found.fluncle.com",
   [
     "connect-src 'self'",

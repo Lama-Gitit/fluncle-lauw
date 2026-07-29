@@ -113,6 +113,27 @@ describe("securityHeadersFor", () => {
     expect(REPORT_ONLY_CSP).not.toContain("upgrade-insecure-requests");
   });
 
+  it("allows the hosts a Cover Art Archive cover REDIRECTS to, not just the stub", () => {
+    // The bug the first watch window found: a CAA cover URL is a redirect stub
+    // (307 → archive.org → 302 → dn<NNNNNN>.ca.archive.org), CSP re-checks every hop,
+    // and a policy naming only `coverartarchive.org` blocks the image at hop one while
+    // REPORTING it under the stub's URL. It read as "already allowed, still blocked"
+    // for 157 events. Both forms are pinned because a `*.archive.org` wildcard does not
+    // match the bare apex the first redirect lands on — dropping either re-breaks it.
+    expect(REPORT_ONLY_CSP).toContain("https://coverartarchive.org");
+    expect(REPORT_ONLY_CSP).toContain("https://archive.org");
+    expect(REPORT_ONLY_CSP).toContain("https://*.archive.org");
+  });
+
+  it("never grants 'unsafe-eval' — the one eval report is a probe that degrades", () => {
+    // FLUNCLE-WEB-7 reports `blocked-uri: eval` from zod's JIT capability probe, which
+    // wraps its `new Function` in a try/catch and falls back to the interpreted parser.
+    // Nothing breaks, so the report is NOT a reason to open the policy's biggest hole;
+    // it is answered at the source by `configureZod({ jitless: true })` in client.tsx.
+    expect(REPORT_ONLY_CSP).not.toContain("unsafe-eval");
+    expect(ENFORCED_CSP).not.toContain("unsafe-eval");
+  });
+
   // THE STRUCTURAL EXEMPTION. `/embed/<logId>` must stay framable by third parties, and
   // the rule that keeps it so is "a route that set its own CSP owns its content policy" —
   // no path string in this module, so any future self-policing route inherits it.
