@@ -1,17 +1,46 @@
 name: Post-deploy Probe
 
-# After a push to main deploys (Cloudflare Workers Builds rebuilds apps/web on
-# every push), wait until production is serving the pushed commit, then sweep every
-# public surface and go red if anything stopped resolving. This is the RESOLUTION
-# half of monitoring — the automated form of the `fluncle-smoke` skill — complementing
-# Sentry (errors) and the 10-minute up/down prober (service health).
+# After a push to main deploys, wait until production is serving the pushed commit,
+# then sweep every public surface and go red if anything stopped resolving. This is the
+# RESOLUTION half of monitoring — the automated form of the `fluncle-smoke` skill —
+# complementing Sentry (errors) and the 10-minute up/down prober (service health).
 #
 # No secrets: the probe issues public GETs only (strictly read-only, side-effect-free).
 # A red check IS the alert — per repo doctrine the operator watches Actions after a push.
+#
+# `paths-ignore` MIRRORS the Cloudflare "Build watch paths" EXCLUDES (Workers Builds →
+# Settings → Build watch paths). A push touching only those paths does not rebuild
+# apps/web, so prod keeps serving the previous commit and this probe's wait step would
+# hard-fail with "Deploy never landed" after 20 minutes. The filter keeps the probe
+# silent on exactly the pushes that never deploy.
+#
+# TWO TRAPS when editing this list:
+#   1. The glob dialects DIFFER. Cloudflare's `*` matches path separators, so its
+#      exclude reads `docs/*`. GitHub Actions' `*` does NOT match `/` — the equivalent
+#      here is `docs/**`. Copying CF's patterns verbatim silently under-matches.
+#   2. The two lists live in different places (dashboard vs this file) and NOTHING
+#      tests that they agree. Drift shows up as a red probe (build skipped, probe ran)
+#      or an unprobed deploy (build ran, probe skipped). Change them together.
+# The test gates are deliberately NOT filtered: quality-checks.yml and e2e.yml still run
+# on every push to main, so a skipped deploy never means skipped tests.
 
 on:
   push:
     branches: [main]
+    paths-ignore:
+      - ".github/**"
+      - "apps/cli/**"
+      - "apps/dns/**"
+      - "apps/extension/**"
+      - "apps/mobile/**"
+      - "apps/raycast/**"
+      - "apps/sonar/**"
+      - "apps/ssh/**"
+      - "docs/**"
+      - "packages/live/**"
+      - "packages/media/**"
+      - "packages/skills/**"
+      - "packages/video/**"
 
 concurrency:
   # A newer push supersedes an older one's probe (its deploy is coalesced/superseded
