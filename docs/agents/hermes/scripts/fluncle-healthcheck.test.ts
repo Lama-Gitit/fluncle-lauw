@@ -422,13 +422,13 @@ describe("boxUptimeMs", () => {
 
 /** Lines the operator classed as REAL PROBLEMS. Every one must score. */
 const REAL_PROBLEMS: readonly { count: number; line: string }[] = [
+  // The UNCLEARED challenge — the run's one re-roll is already spent, so the track is lost.
+  // Its cleared sibling lives in BENIGN_CHATTER below: a challenge that re-rolls to a fresh
+  // exit and then succeeds is recovered friction on a healthy tick, and at ~12% of runs it
+  // would hold capture at `degraded` forever if it scored (#996).
   {
-    count: 347,
-    line: "[capture-sweep] bot-challenged at search — re-rolling the proxy session for a fresh exit",
-  },
-  {
-    count: 263,
-    line: "[capture-sweep] bot-challenged at download — re-rolling the proxy session for a fresh exit",
+    count: 43,
+    line: "[capture-sweep] bot-challenged at download (rerolled=false) — the run's one re-roll is already spent",
   },
   {
     count: 92,
@@ -455,6 +455,17 @@ const REAL_PROBLEMS: readonly { count: number; line: string }[] = [
 
 /** Benign high-volume chatter. NONE of it may score — this is the false-positive gate. */
 const BENIGN_CHATTER: readonly { count: number; line: string }[] = [
+  // The CLEARED challenge and the per-tick recap (#996). One hyphen separates this from the
+  // uncleared line above: "bot challenge" (a space) is not the `bot-challenged` STRAIN_PHRASES
+  // entry, so recovered friction stays silent while a lost track still scores.
+  {
+    count: 567,
+    line: "[capture-sweep] bot challenge at search (rerolled=true) — moving to a fresh residential exit",
+  },
+  {
+    count: 425,
+    line: "[capture-sweep] bot challenges this tick: 3 (2 cleared by a re-roll, 1 with the re-roll spent)",
+  },
   { count: 471, line: "[embed-sweep] mb_<id>: embedded + written" },
   { count: 454, line: "[enrich-sweep] mb_<id>: catalogue done (bpm null, key null)" },
   { count: 153, line: "[enrich-sweep] mb_<id>: catalogue done (bpm 174.02, key null)" },

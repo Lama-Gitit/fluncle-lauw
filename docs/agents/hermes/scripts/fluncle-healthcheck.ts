@@ -1146,9 +1146,16 @@ export function markerStrain(body: string): number {
 // fixed condition clears the board the same morning rather than a full day later.
 //
 // POINTS (12). The bar for "standing condition, not a bad moment". Read against the measured
-// two-day sample: capture took ~305 bot-challenges/day (~76 in a 6h window) and the three bio
-// crons ~136 rejections/day between them — both comfortably over. A single sweep tick cannot
-// reach it alone on batch size (the batch caps here run 4–10 items).
+// two-day sample: the three bio crons took ~136 rejections/day between them — comfortably over.
+// A single sweep tick cannot reach it alone on batch size (the batch caps here run 4–10 items).
+//
+// The capture half of that original calibration NO LONGER APPLIES and is left out on purpose.
+// It read capture's ~305 bot-challenges/day (~76 in a 6h window) as evidence for this bar, but
+// those lines were RECOVERED friction — a challenge that re-rolls to a fresh proxy exit and then
+// succeeds is a healthy tick, and at ~12% of runs it would have held capture at `degraded`
+// forever. #996 split the wording so only an UNCLEARED challenge scores; the surviving evidence
+// for 12 is the bio sample above. See capture-sweep.ts's meter for the two spellings and why one
+// hyphen carries the distinction.
 //
 // TICKS (3). The spread requirement, and the reason one catastrophic tick does NOT land here:
 // that case is already `judgeCron`'s (`ok:false`, or a killed run with no summary). This row
