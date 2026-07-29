@@ -41,6 +41,16 @@ on:
       - "packages/media/**"
       - "packages/skills/**"
       - "packages/video/**"
+      # The root canon/instruction docs. NOT `*.md` — on the Cloudflare side that
+      # wildcard matches path separators and would swallow apps/web/content/docs/**,
+      # silently freezing the public /docs site. Both lists name these one by one.
+      - "AGENTS.md"
+      - "CLAUDE.md"
+      - "DESIGN.md"
+      - "LORE.md"
+      - "PRODUCT.md"
+      - "README.md"
+      - "VOICE.md"
 
 concurrency:
   # A newer push supersedes an older one's probe (its deploy is coalesced/superseded
