@@ -339,13 +339,18 @@ const K: Kiosk[] = [
     url: "https://chromewebstore.google.com/detail/efkkceaofendabikblfjhoepgejfpakk",
     wh: "extension",
   },
-  {
-    label: "App",
-    tint: "#6bb0ff",
-    url: "https://apps.apple.com/app/id6790080540",
-    wh: "iOS",
-  },
 ];
+
+// the mobile cabinet — it floated above the plaza with its cable dangling unplugged
+// through App Store review; approved 2026-07-29, so now it stands where it floated,
+// wired into the spine like everything else. Not in K: the 6-per-row grid is full,
+// and this one keeps its own perch (renderPlaza draws its long cable + the plug).
+const MOBILE_KIOSK: Kiosk = {
+  label: "mobile",
+  tint: "#7bd0c0",
+  url: "https://apps.apple.com/app/id6790080540",
+  wh: "iOS",
+};
 
 // the mixtape dream-tail (Fluncle dreaming); +2 cols to sit in the shifted galaxy
 const D: Station[] = [
@@ -521,7 +526,6 @@ const STYLES = `
 @media (prefers-reduced-motion: reduce){
   .fpl .listener{animation:none}
   .fpl .wave{animation:none;opacity:.45;transform:none}
-  .fpl .floatk{animation:none;transform:rotate(3deg)}
 }
 .fpl .hint .coarse{display:none}
 @media (pointer: coarse){
@@ -550,14 +554,6 @@ const STYLES = `
 .fpl .kiosk .lb{font-size:11px;font-weight:600;color:color-mix(in srgb,var(--tint) 66%,var(--cream))}
 .fpl .kiosk .wh{font-size:9.5px;color:var(--faint)}
 .fpl .kiosk:hover .wh{color:var(--cream-dim)}
-.fpl .floatk{position:absolute;width:104px;text-align:center;--tint:#7bd0c0;pointer-events:none;
-  animation:fpl-float 5.4s ease-in-out infinite}
-.fpl .floatk img{width:76px;height:76px;image-rendering:pixelated;display:block;margin:0 auto 2px;
-  filter:drop-shadow(0 0 8px color-mix(in srgb,var(--tint) 55%,transparent))}
-.fpl .floatk .lb{font-size:11px;font-weight:600;color:color-mix(in srgb,var(--tint) 66%,var(--cream))}
-.fpl .floatk .wh{font-size:9.5px;color:var(--faint);letter-spacing:.04em}
-.fpl .floatk .dangle{position:absolute;left:2px;top:72px;overflow:visible}
-@keyframes fpl-float{0%,100%{transform:translateY(0) rotate(3deg)}50%{transform:translateY(-12px) rotate(-2deg)}}
 `;
 
 const CHROME = `
@@ -932,21 +928,21 @@ export function createPipeline(container: HTMLElement): { destroy: () => void } 
     if (plan) {
       wire += gcurve(GALX, CY, plan.x, plan.y);
     }
-    plazaG.innerHTML = wire;
 
-    // the mobile app — not wired into the plaza yet: a cabinet floating loose
-    // above the row, cable dangling unplugged, coming soon
-    const fm = document.createElement("div");
-    fm.className = "floatk";
-    fm.style.left = B(13.75) + "px";
-    fm.style.top = CY - 330 + "px";
-    fm.innerHTML =
-      `<img src="${SPRITE("kiosk")}" alt="">` +
-      `<svg class="dangle" width="52" height="128" viewBox="0 0 52 128">` +
-      `<path d="M38,4 C38,42 12,54 14,80 C16,102 32,104 30,116" fill="none" stroke="#4b4536" stroke-width="2" stroke-linecap="round"/>` +
-      `<rect x="25" y="115" width="10" height="9" rx="2" fill="#6e6657"/></svg>` +
-      `<div class="lb">mobile</div><div class="wh">coming soon</div>`;
+    // the mobile cabinet — live since 2026-07-29, standing on its old floating perch
+    // with the once-dangling cable now running all the way down into the spine; the
+    // plug that hung loose through review sits seated at the junction.
+    const fmx = B(13.75),
+      fmy = CY - 330,
+      fmk = fmx + 52;
+    const fm = kioskEl(MOBILE_KIOSK);
+    fm.style.left = fmx + "px";
+    fm.style.top = fmy + "px";
     plaza.appendChild(fm);
+    wire += stem(fmk, CY, fmk, fmy + 96);
+    wire += `<rect x="${fmk - 5}" y="${CY - 5}" width="10" height="9" rx="2" fill="#6e6657"/>`;
+
+    plazaG.innerHTML = wire;
   }
   renderPlaza();
 
