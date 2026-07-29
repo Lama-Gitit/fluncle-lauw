@@ -39,11 +39,66 @@ The `draft_artist_bio` / `draft_label_bio` READ closes both gaps at once — the
 
 ## The cardinal safety guarantee: fill an EMPTY bio only
 
-`describe_artist` / `describe_label` fill an entity's bio **only when it is empty**. An entity that already carries a bio — operator-written **or** previously auto-authored — is a no-op (`skipped: true`); the box **never** clobbers an existing bio. **The operator override always wins**, enforced **server-side** (the atomic `fillEmptyArtistBio` / `fillEmptyLabelBio` SQL predicate gated on `bio IS NULL/''`). A gate rejection leaves the entity queued for a future pass.
+`describe_artist` / `describe_label` fill an entity's bio **only when it is empty**. An entity that already carries a bio — operator-written **or** previously auto-authored — is a no-op (`skipped: true`); the box **never** clobbers an existing bio. **The operator override always wins**, enforced **server-side** (the atomic `fillEmptyArtistBio` / `fillEmptyLabelBio` SQL predicate gated on `bio IS NULL/''`). A gate rejection leaves the entity queued for another pass — up to its attempt budget (below), never forever.
 
 ## The voice gate (a hard ship requirement)
 
 The bio is a live, **public** Fluncle surface. `gateBioText` (`lib/server/bio.ts`) reuses the SAME shared scan as the note (`scanObservationScript`) but in the factual-dossier register: it passes `{ allowGeography: true }`, so it keeps the banned-identity-word, no-exclamation Dry Rule, and no-"we"-as-company bans but NOT the geography ban (a Wikipedia-style bio names a real country/city plainly). It carries the bio's own longer length bounds (40–500 chars — a 2–4 sentence paragraph, not a one-line note). A violation hard-fails the store before the bio is shown. The box authors through `copywriting-fluncle`; the Worker re-scans (defence in depth); the operator override is the final content control.
+
+### The name exemption: the gate polices what FLUNCLE wrote
+
+The scan runs over the bio **with the entity's own name masked out** (`maskEntityName`, `lib/server/bio.ts`) — exact, case-insensitive occurrences of the full name, nothing else. An entity's name is not Fluncle's prose: "Future Signal", "Invaderz Transmissions", and "Jungle Sound: The Bassline Strikes Back!" are real-world names, and a bio about them must be able to name them. Without the exemption those three were **unwritable** — a bio necessarily names its subject, so every rewrite tripped the same ban and no draft could ever pass.
+
+Nothing about the bans changed: `BANNED_WORDS`, the Dry Rule, the "we" ban, and both length bounds are exactly as they were. Only the TEXT handed to the scanner changed. Two properties follow, and both are pinned by tests:
+
+- **The word is not amnestied, only the name.** A bio may name "Future Signal" and still fails if it uses "signal" as a generic word anywhere else in the paragraph.
+- **Masking the full name removes the punctuation inside it**, which is how an album titled with a `!` clears the Dry Rule without the Dry Rule being weakened for anything Fluncle actually wrote.
+
+The match is **word-bounded**, with the boundaries conditional on the name's own edges (`(?<!\w)` only when it starts with a word character, `(?!\w)` only when it ends with one). Without that, a short name is a substring wildcard: the artist "Sign" would mask the middle out of "signal" and "Mission:" would eat the tail of "transmission:", quietly amnestying the exact words the first property promises to keep policing. The conditional edges are what let a title ending in `!` still mask.
+
+A **partial** reference is still judged: a bio about "Future Signal" that says only "Signal" is rejected. That is deliberate — conservative, and the rewrite can use the full name.
+
+**The one unavoidable cost:** when an entity's **whole name IS a banned word**, that word is amnestied in its bio entirely — there is no way to tell "the artist Signal" from the noun in "a signal", because they are the same token. Production carries at least three such entities (`/artist/signal`, `/album/anomaly`, `/album/content`). It is the accepted cost of letting those pages have a bio at all; the alternative is that they cannot be written.
+
+### The attempt budget: three authorings, ever
+
+A rejection used to leave the entity queued with nothing counting the attempts, so "retry" meant "forever" — three entities were re-authored ~90 times each over two days. An entity now gets **at most three authoring attempts, ever**: the initial draft plus two rewrites.
+
+- **Each rejection is fed back into the next pass** as the exact reason to fix (`buildRewriteBlock` in the sweep, the logbook sweep's shape), so a rewrite is aimed rather than blind.
+- **The third draft LANDS.** The last attempt delivers `--final-attempt`, and the Worker (`acceptFinalDraftBio`) stores the draft even if the voice scan refuses it. This is a BACKSTOP, not the routine path — with the name exemption in place, the entities that caused the runaway now clear the gate on attempt 1.
+- **The acceptance is never silent.** The Worker logs `describe_<kind>: FINAL-ATTEMPT ACCEPTANCE`, returns `gateBypassed: true` + the accepted `voiceViolations`, the CLI prints them, and the sweep logs `FINAL-ATTEMPT ACCEPTANCE … REVIEW THIS <KIND>` and counts them as `bypassedGate` in its summary line. **Grep the cron output for `FINAL-ATTEMPT ACCEPTANCE` to find every bio that landed this way.** The acceptance bypasses the voice SCAN only: an absent, too-short, or too-long draft is still refused.
+- **Only a gate REJECTION spends the budget.** A rejection is deterministic evidence that this draft was bad. A transport or model failure — a `claude -p` that exits non-zero, returns `is_error`, or returns nothing — is no evidence about the draft at all, because there is no draft; the entity keeps its whole budget and is retried next tick. Otherwise three flaky calls could write an entity off permanently, and a flaky THIRD call would leave it with no draft to accept and no retry. Those failures instead log a line the `/status` sweep-strain detector scores, so a sweep grinding on a broken model surfaces as `degraded`.
+- **The count persists across ticks** in a small on-box TSV at `$HOME/.entity-bio-sweep/attempts` (`<kind>:<slug><TAB>attempts<TAB>lastEpoch`), the shape of the render conductor's poison ledger and covered by the nightly box-state backup. It is written the moment a rejection lands, so a tick that dies later cannot un-spend it. The entry is dropped the moment a bio lands.
+- **The sweep's log WORDING is part of the contract.** Since the strain detector reads each sweep's captured stderr, these lines are scored: a rejected draft that is about to be rewritten reads as a step (a sweep that rewrites and then succeeds must not read as degraded), while an exhaustion, a transport failure, and a failed ledger write carry the distress vocabulary. The rule is written out above `describeOne` in the sweep and pinned by tests that score the real lines with the real detector.
+- **An exhausted entity is skipped without consuming the batch cap**, so it can never block the queue behind it — and it costs nothing at all (no draft fetch, no model call). It reports as `exhausted` in the summary. To re-arm one after the gate or the prompt changes, delete its line from that file.
+
+### What the final-attempt acceptance publishes
+
+On the third attempt, a bio that **failed** the automated voice gate is stored and published. It is not quarantined, not held for approval, and not marked in the database — it renders identically to a bio that passed. Only the voice SCAN is bypassed; an absent, too-short, or too-long draft is still refused and the entity reports as `exhausted` instead.
+
+**Where such a bio is publicly readable.** The page copy is the obvious half:
+
+| Surface                                                                | Form                                                                                                                                                                         |
+| ---------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `/artist/<slug>`, `/label/<slug>`, `/album/<slug>` page body           | full text                                                                                                                                                                    |
+| `<meta name="description">` + `og:description` + `twitter:description` | truncated to ≤160 chars at a sentence boundary (`lib/meta-description.ts`)                                                                                                   |
+| The `GraphLink` hover card (`components/graph-link.tsx`)               | full text in the DOM, clamped to 4 lines by CSS only — and it appears **away from the entity's own page**: the homepage feed, log pages, the hub indexes, `/recommendations` |
+
+The **machine-readable discovery layer** is the half that surprises people, because none of it is page copy and all of it carries the paragraph in full:
+
+| Surface                                                                                    | Form                                                                                                           |
+| ------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------- |
+| JSON-LD `description` — `MusicGroup` / `Organization` / `MusicAlbum` (`lib/log-schema.ts`) | **full text, untruncated** — the same page that truncates its meta description emits the whole bio to crawlers |
+| The public MCP server `/mcp`, `get_artist` / `get_label`                                   | **full text, unauthenticated** — handed to arbitrary third-party agents                                        |
+| ChatDnB `/chat` artist + label cards                                                       | **full text**                                                                                                  |
+| `GET /api/v1/labels/{slug}`, `/api/v1/albums/{slug}`, `/api/v1/graph/{kind}/{slug}`        | full text, public JSON                                                                                         |
+| `fluncle labels <slug> --json`, `fluncle albums <slug> --json`                             | full text                                                                                                      |
+
+It does **not** reach `llms.txt`, the sitemap, any RSS/Atom/JSON/podcast/ICS feed, oEmbed, the OG images, `GET /api/v1/artists/{slug}` (that contract carries no `bio` field — an asymmetry with labels and albums), WebMCP, mobile, the SSH terminal, DNS, Raycast, or the extension.
+
+**Finding one.** Grep the cron output for `FINAL-ATTEMPT ACCEPTANCE`; the sweep's summary line carries a `bypassedGate` count; the Worker logs `describe_<kind>: FINAL-ATTEMPT ACCEPTANCE`; the `describe_*` API response carries `gateBypassed: true` + `voiceViolations`; the CLI prints both. **That log line is the only durable record** — `bio_status` has no value for "landed via the final attempt", so once the cron marker rotates a bypassed bio is indistinguishable in the database from one that cleared the gate.
+
+**This is a deliberate operator ruling**, taken after a canon review recommended dropping the acceptance on the grounds that the name exemption already clears the entities it was introduced for. To reverse it, `apps/web/src/lib/server/bio.ts` carries the removal recipe under `SEVERABLE`; nothing else depends on it, and a third rejected draft would simply land on the `exhausted` outcome the sweep already implements.
 
 ## The prompt lives in the DATABASE, not in the image
 
