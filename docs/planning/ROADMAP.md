@@ -52,7 +52,7 @@ One human act (Maurice finds the banger and adds it), instant fan-out to ~10 sur
 - [ ] **TikTok's in-app finish.** The auto-advance pushes the inbox draft; the operator attaches the official sound and publishes, then `fluncle-social-capture` flips captured → published on its own. Manual by design — no legitimate API audio path.
 - [ ] **The Friday newsletter send.** The sweep drafts and persists the edition and offers the literal `fluncle admin newsletter send <id>`; the send stays an operator tap. The one weekly-cadence step.
 
-**Deferred on purpose** — the per-finding **Instagram** master stays dark (no legitimate API audio path; a business/creator account mutes it, IG's licensed audio is app-only). Parked, not closed. Set clips are the re-opened half and ride the Studio drip-feed.
+**Deferred on purpose** — the per-finding **Instagram** master stays dark (no legitimate API audio path; a business/creator account mutes it, IG's licensed audio is app-only). Parked, not closed. Set clips were the re-opened half; their drip-feed is now parked too (see _Fluncle Studio_ under Next).
 
 ### Standing operation — the watch list
 
@@ -141,12 +141,12 @@ Both remaining tuning items now run from `/admin/prompts` with **no deploy and n
 - **Context-notes shape.** Tune the distill prompt against accumulated real notes: which Firecrawl facts are worth keeping, how the distilled prose plus the one-line `Texture:` reads, and how cleanly it fuels a grounded observation script. A noisy note makes a worse spoken observation.
 - **The Recovered-audio voice guide.** Fold Maurice's notes from real renders into the `copywriting-fluncle` voice reference + `observation-agent.md`: the arc (sensory → mood → connection → log ID → artist/title), line length and pacing for a heard surface, how hard the cosmos-sauce rides out loud, and where "too purple" begins. (SSML is not a lever — `<break>` tokens are stripped; Cartesia paces on punctuation.)
 
-### Fluncle Studio — the caption gap blocks the IG validation
+### Fluncle Studio — clipping live, the drip parked
 
 Clipping is live end to end: `distribute --set-video` stages the rendition, `analyze-set.ts` suggests windows, `/admin/studio/<logId>` frames draggable 9:16 clips, the on-box `fluncle-studio-clip` cron cuts and ships each `footage.mp4`, and `/admin/clips` hands off IG (with audio) / TikTok (audio-stripped) downloads. The drip-feed scheduler is built too — the schedule/status table, kill-switch KV, `pushInstagramReel`, the agent-tier `drip_clips` tick, auto-queue with 23–25h jitter. Doctrine: [docs/fluncle-studio.md](../fluncle-studio.md).
 
-- **The caption gap is fenced, not yet filled.** A blank-caption clip can no longer go out: the drip tick SKIPS it (`skippedBlank`) rather than posting a credit-less Reel, and the kill switch is **default-deny** (only an explicit `false` on `clip_drip_paused` runs a tick, so the drip stays dark until the operator enables it). A cued-but-uncertified window now credits its tracks by `Artist — Title` too. What remains is the operator beat: cue the source recording (all four existing clips come from the un-cued rolling set, so they still build empty), **then** enable the switch and fire one real `drip_clips` tick to prove the push posts end to end before the cron runs wide.
-- **Then add a `clip-drip-timer/` host unit** beside `studio-clip-timer/` and let pin-watch deploy it. The sweep's own header says it plainly — auto-updated from main via pin-watch, docker-exec'd by a host timer, **no `docker cp`**. [docs/fluncle-studio.md](../fluncle-studio.md) still prescribes the retired `docker cp` + `hermes cron create` mechanism and wants the same correction.
+- **The drip is PARKED (operator ruling, 2026-07-29).** Never used, not wanted near-term — and it costs nothing parked: no host timer exists, nothing on the box ticks `drip_clips`, and the kill switch is **default-deny** (only an explicit `false` on `clip_drip_paused` runs a tick), so it stays dark by construction. The caption safety rails shipped and hold regardless: a blank-caption clip is skipped (`skippedBlank`), never posted, and a cued-but-uncertified window credits its tracks by `Artist — Title`.
+- **The un-parking path, whenever clips are wanted:** cue a source recording or caption a clip (the four existing clips come from the un-cued rolling set, so they build empty and are skipped), `fluncle admin clips drip-resume`, one real `drip_clips` tick to prove the push end to end — then add the `clip-drip-timer/` host unit beside `studio-clip-timer/` and let pin-watch deploy it (no `docker cp`; [docs/fluncle-studio.md](../fluncle-studio.md) still prescribes the retired `docker cp` + `hermes cron create` mechanism and wants that correction when this is picked up).
 
 ### Fluncle mobile — 1.0 live on the App Store, the 1.1 arc unblocked
 
