@@ -103,7 +103,9 @@ async function publishAndRead(): Promise<Record<string, unknown>> {
     args: [TRACK_ID],
     sql: `select isrc, isrc_attempted_at, in_release_id, in_master_id,
                  backfill_discogs_attempted_at, backfill_discogs_attempts,
-                 backfill_discogs_done_at, backfill_discogs_failures
+                 backfill_discogs_done_at, backfill_discogs_failures,
+                 spotify_anchored_at, spotify_anchor_attempted_at,
+                 spotify_anchor_source, spotify_anchor_verified_by
           from tracks where track_id = ?`,
   });
   const row = result.rows[0];
@@ -127,6 +129,21 @@ describe("publishTrack — the identity-ledger stamps", () => {
     expect(row.backfill_discogs_done_at).not.toBeNull();
     expect(Number(row.backfill_discogs_attempts)).toBe(1);
     expect(Number(row.backfill_discogs_failures)).toBe(0);
+  });
+
+  it("is born ANCHORED, with `publish` provenance and the hit time stamped", async () => {
+    // A finding's Spotify id came from the operator's URL and was re-read through Spotify's own
+    // API, so the moment publish writes the row IS the moment the link was verified, and the
+    // platform's own record is the signal. These are the best-provenance links in the archive and
+    // must never read `unknown-legacy`.
+    const row = await publishAndRead();
+
+    expect(row.spotify_anchored_at).not.toBeNull();
+    expect(row.spotify_anchor_source).toBe("publish");
+    expect(row.spotify_anchor_verified_by).toBe("publish");
+    // The anchor GATE never ran, so the last-attempt stamp stays null rather than putting a
+    // publish-born row into the re-ask backoff's reading.
+    expect(row.spotify_anchor_attempted_at).toBeNull();
   });
 
   it("stamps the ISRC attempt on a CLEAN MISS — Spotify omitted it and Deezer had none either", async () => {
