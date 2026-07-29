@@ -176,9 +176,9 @@ The on-site layer shipped (per-finding pages with definitional prose + `MusicRec
 
 The machine- and developer-facing surfaces mapped in [docs/surfaces-doctrine.md](../surfaces-doctrine.md) (dig, the versioned contract-first API, the Fumadocs `/docs` hub with its per-page sitemap children, feeds, CLI distribution, SSH deep-links) are live. What's open is **the non-gating tail:** the `today` dig label, a public changelog, a Docker image, broader data-graph anchors (Discogs, Last.fm, ListenBrainz), directory listings (Product Hunt, Internet Archive, a Hugging Face dataset), the deferred **rave SSH `.onion`** identity (the web onion is live — `docs/tor.md`), and a **Discord representation of the log spine** (the one surface from the identity map never stood up; Discord exists today only as the Hermes chat presence). Each becomes a registry entry when one earns its keep.
 
-### Announcements — one operator line, four things owed one
+### Announcements — one operator line, three things owed one
 
-Announcing to the crew is one act, not a per-feature chore: a quiet line to the crew (Telegram / the Friday letter), drafted in Fluncle's voice through the `copywriting-fluncle` skill and operator-sent. Four things are owed one — **Fluncle for iOS** (live on the App Store 2026-07-29, `app.ios` registry fan-out done), **Fluncle Lens** (live in the Chrome Web Store, `extension.lens` registry fan-out done), the **Galaxy game** (v1 live; announce once the near-polish lands), and each mixtape as it goes out. Anything new joins this line rather than growing its own.
+Announcing to the crew is one act, not a per-feature chore: a quiet line to the crew (Telegram / the Friday letter), drafted in Fluncle's voice through the `copywriting-fluncle` skill and operator-sent. Three things are owed one — **Fluncle Lens** (live in the Chrome Web Store, `extension.lens` registry fan-out done), the **Galaxy game** (v1 live; announce once the near-polish lands), and each mixtape as it goes out. (Fluncle for iOS went live 2026-07-29 with no announcement, by operator ruling — the channel's one member already knew; the app can ride a later go-to-market beat instead.) Anything new joins this line rather than growing its own.
 
 ### Brand & canon — the video-side remainder (moodboard → canon audit)
 
