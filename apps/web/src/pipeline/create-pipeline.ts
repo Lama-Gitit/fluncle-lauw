@@ -323,6 +323,9 @@ const K: Kiosk[] = [
   { label: "radio", tint: "#6f9bd6", url: "https://radio.fluncle.com", wh: "observations" },
   { label: "CLI", tint: "#4fb39a", url: "https://www.fluncle.com/docs", wh: "terminal" },
   { label: "SSH", tint: "#63d69a", url: "https://www.fluncle.com/docs", wh: "rave." },
+  // the mobile cabinet — it floated above the plaza with its cable dangling unplugged
+  // through App Store review; approved 2026-07-29, it joined the row like everything else.
+  { label: "mobile", tint: "#7bd0c0", url: "https://apps.apple.com/app/id6790080540", wh: "iOS" },
   {
     label: "MCP",
     tint: "#8e9bd6",
@@ -340,17 +343,6 @@ const K: Kiosk[] = [
     wh: "extension",
   },
 ];
-
-// the mobile cabinet — it floated above the plaza with its cable dangling unplugged
-// through App Store review; approved 2026-07-29, so now it stands where it floated,
-// wired into the spine like everything else. Not in K: the 6-per-row grid is full,
-// and this one keeps its own perch (renderPlaza draws its long cable + the plug).
-const MOBILE_KIOSK: Kiosk = {
-  label: "mobile",
-  tint: "#7bd0c0",
-  url: "https://apps.apple.com/app/id6790080540",
-  wh: "iOS",
-};
 
 // the mixtape dream-tail (Fluncle dreaming); +2 cols to sit in the shifted galaxy
 const D: Station[] = [
@@ -911,10 +903,12 @@ export function createPipeline(container: HTMLElement): { destroy: () => void } 
     const x0 = B(11.3),
       gapx = 128,
       off = [-132, 26];
+    // 13 cabinets: 7 up top (mobile joined the row on App Store approval), 6 below,
+    // the shorter row centered under the longer by half a gap.
     K.forEach((k, i) => {
-      const col = i % 6,
-        row = Math.floor(i / 6),
-        x = x0 + col * gapx,
+      const col = i % 7,
+        row = Math.floor(i / 7),
+        x = x0 + col * gapx + (row === 1 ? gapx / 2 : 0),
         kx = x + 52;
       const y = CY + (off[row] ?? 0);
       const a = kioskEl(k);
@@ -928,20 +922,6 @@ export function createPipeline(container: HTMLElement): { destroy: () => void } 
     if (plan) {
       wire += gcurve(GALX, CY, plan.x, plan.y);
     }
-
-    // the mobile cabinet — live since 2026-07-29, standing on its old floating perch
-    // with the once-dangling cable now running all the way down into the spine; the
-    // plug that hung loose through review sits seated at the junction.
-    const fmx = B(13.75),
-      fmy = CY - 330,
-      fmk = fmx + 52;
-    const fm = kioskEl(MOBILE_KIOSK);
-    fm.style.left = fmx + "px";
-    fm.style.top = fmy + "px";
-    plaza.appendChild(fm);
-    wire += stem(fmk, CY, fmk, fmy + 96);
-    wire += `<rect x="${fmk - 5}" y="${CY - 5}" width="10" height="9" rx="2" fill="#6e6657"/>`;
-
     plazaG.innerHTML = wire;
   }
   renderPlaza();
