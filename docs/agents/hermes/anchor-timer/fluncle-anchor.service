@@ -15,14 +15,20 @@ Type=oneshot
 # pin-watch); this host unit only TRIGGERS it, and the sweep self-writes its /status marker
 # (cron-output.sh). Secrets (the agent token + APIFY_API_TOKEN) come from the shared op-injected
 # ${HOME}/.fluncle-secrets.env the wrapper sources.
-ExecStart=/usr/bin/docker exec -u hermes -e HOME=/opt/data/home -e FLUNCLE_ANCHOR_BATCH=500 hermes bash /opt/hermes-scripts/anchor-sweep.sh
-# One tick drains 500 rows (`FLUNCLE_ANCHOR_BATCH`) — the sweep PAGES the worklist in ≤200-row reads
+ExecStart=/usr/bin/docker exec -u hermes -e HOME=/opt/data/home -e FLUNCLE_ANCHOR_BATCH=250 hermes bash /opt/hermes-scripts/anchor-sweep.sh
+# One tick drains 250 rows (`FLUNCLE_ANCHOR_BATCH`) — the sweep PAGES the worklist in ≤200-row reads
 # (the server clamp), so the batch may exceed one read's cap (anchor-sweep.ts `runAnchorSweep`,
 # 2026-07-26). Safe to run large because the FREE rungs (Deezer ISRC-recovery + ListenBrainz + Spotify
-# search) resolve most rows at zero Apify cost. At ~3.7s/row a full tick is ~31 min, so the timeout is
-# 50 min; it still sits under the 1h cadence, so an over-long tick just skips the next trigger and
-# self-heals. Once the ready pool is dry the sweep no-ops on an empty queue — lower the batch back
-# toward 250 (or 15) for steady-state if desired.
+# search) resolve most rows at zero Apify cost.
+#
+# 250 IS THE RULED VALUE (operator, 2026-07-29). This file had said 500 while a host drop-in
+# (fluncle-anchor.service.d/batch.conf) quietly pinned 250 — a drop-in wins, so the effective rate was
+# half of what the repo advertised, and reading the unit told you the wrong thing. The drop-in is
+# removed and this line is the single source; put the value HERE, never in a drop-in.
+# Measured 2026-07-29: a 250-row tick = 9.4 min (~2.3s/row) → 171 anchored / 79 missed / 0 Apify.
+# The 50-min timeout leaves generous headroom and still sits under the 1h cadence, so an over-long
+# tick just skips the next trigger and self-heals. Once the ready pool is dry the sweep no-ops on an
+# empty queue, so the batch is a ceiling rather than a spend.
 TimeoutStartSec=3000
 # Modest hardening for a root docker-driving oneshot.
 NoNewPrivileges=true
