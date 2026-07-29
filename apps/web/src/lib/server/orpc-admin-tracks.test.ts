@@ -150,7 +150,26 @@ const LIST_ITEM = {
   trackId: TRACK_ID,
 };
 
-beforeAll(setAdminTokenEnv);
+// The cold import of `./orpc` is warmed HERE, in the hook, rather than being charged to
+// whichever test happens to run first.
+//
+// Every test in this file reaches the router the same way — `await import("./orpc")`, 102
+// times — and 101 of those hit the module cache and cost nothing. The first one drags the
+// whole app graph in (the router + every contract + the server modules it re-exports), and
+// on a loaded Cloudflare build box that took **20,032 ms** on 2026-07-29 against the 20,000 ms
+// `testTimeout`, failing `deploy:gate` and blocking the deploy with a green local run. It is
+// not a slow test; it is a module load wearing a test's timeout. Raising `testTimeout` was
+// the previous answer (5s → 20s, see vitest.config.ts) and it only moved the threshold — the
+// same build shows the sibling oRPC files paying 2.5–8 s for the identical import, so which
+// file loses is a scheduling lottery, not a property of the code under test.
+//
+// A hook has its own budget, so charging the import to `beforeAll` (with room for a badly
+// contended box) takes the load off the per-test clock entirely: the tests then measure only
+// what they actually exercise. Sibling oRPC test files still carry the original shape.
+beforeAll(async () => {
+  setAdminTokenEnv();
+  await import("./orpc");
+}, 120_000);
 
 beforeEach(() => {
   recordNoteRejection.mockReset();
