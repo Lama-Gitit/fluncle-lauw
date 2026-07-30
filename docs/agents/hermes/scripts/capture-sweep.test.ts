@@ -8,6 +8,7 @@
 // side-effect free (no yt-dlp spawn, no R2, no network). Keep this green when touching
 // the sticky-proxy builder, the duration guard, the key builder, or the candidate ranker.
 import { describe, expect, test } from "bun:test";
+import { readFileSync } from "node:fs";
 import {
   bpmIsMissing,
   captureSessionSeed,
@@ -40,6 +41,24 @@ import {
 // sweep's stderr is teed into the marker and scored by these two functions, so the only
 // honest way to pin the wording contract is to run the real lines through them.
 import { countDistressLines, countSummaryStrain } from "./fluncle-healthcheck";
+
+describe("capture sweep queueDepth source contract", () => {
+  const source = readFileSync(new URL("./capture-sweep.ts", import.meta.url), "utf8");
+
+  test("never launders the bounded page length or limit into queueDepth", () => {
+    expect(source).not.toMatch(/queueDepth\s*:\s*(?:queue\.length|QUEUE_LIMIT)\b/);
+  });
+
+  test("omits queueDepth rather than scanning the unindexed capture predicate every tick", () => {
+    // `countTrackWork(kind=capture)` scans the growing tracks table and pulls in findings via
+    // `f.log_id`; unlike embed, capture has no covering partial queue index. A hot-path scan is
+    // not an acceptable price for this gauge, so absence is the contract until an operator-owned
+    // index is proven on hosted Turso.
+    expect(source).not.toMatch(/\bqueueDepth\s*:/);
+    expect(source).not.toContain("fetchCaptureQueueDepth");
+    expect(source).not.toContain("kind=capture&scope=all&count=true");
+  });
+});
 
 describe("buildStickyProxyUrl", () => {
   test("appends __sessid.<sessionId> to the username and url-encodes user + pass", () => {

@@ -1584,7 +1584,10 @@ async function main(): Promise<void> {
       elapsedMs: Date.now() - started,
       failed: counts.failed,
       ok: true,
-      queueDepth: queue.length,
+      // Deliberately NO `queueDepth`. `queue.length` is only the bounded page, while the honest
+      // `count=true` capture predicate scans the growing tracks table plus its findings join on
+      // every hot-path tick (capture has no covering queue index). Until an operator-approved,
+      // hosted-Turso-proven index exists, omission is the only honest and affordable gauge.
       skipped: counts.skipped,
       unmatched: counts.unmatched,
     }),
