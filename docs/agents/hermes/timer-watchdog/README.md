@@ -33,11 +33,11 @@ Seven sweeps sat dead for 13 hours with no alert. The catalogue anchor queue sta
 1. **Prevention** — `rearm_stalled_timer` in [`../pin-watch/rebuild-hermes.sh`](../pin-watch/rebuild-hermes.sh). The quiesce restore path now checks each timer it restarts and kicks the service once if it came back with no next elapse. This closes the exact hole the incident came through.
 2. **Detection** — this unit. An independent net that catches the same stranding from **any** cause: an `install-host-timers.sh` re-run shortly after boot, a manual `systemctl stop`, a crash mid-quiesce. It re-arms what it finds and posts a Discord alert naming the timers, because a stranded timer means something stopped it outside the paths that know to restore it.
 
-## The gap that is still open: nothing watches the watchdog
+## No `/status` marker, but no longer unwatched
 
-This unit runs on the host, outside the container, so it never sources [`../scripts/cron-output.sh`](../scripts/cron-output.sh) and writes no `/status` marker — and unlike `pin-watch` (which POSTs its own `self-deploy` row) it POSTs nothing either. So it appears on `/status` **not at all**. A clean pass is silent by design, which means a watchdog that has been dead for a week looks exactly like a watchdog with nothing to do: the blind-detector shape this whole unit exists to catch, turned on itself. `fluncle-secrets-sync` is in the same position.
+This unit runs on the host, outside the container, so it never sources [`../scripts/cron-output.sh`](../scripts/cron-output.sh) and writes no `/status` marker. That is why it is declared in `NON_WRITER_TIMERS` in [`../scripts/cron-roster.ts`](../scripts/cron-roster.ts), whose guard fails the build if the declaration ever stops being true.
 
-It is recorded rather than papered over: both timers are declared in `NON_WRITER_TIMERS` in [`../scripts/cron-roster.ts`](../scripts/cron-roster.ts), whose guard fails the build if that declaration ever stops being true. Closing it properly means giving the pass a `/status` row of its own — a `checked` denominator, not a `healed` count, because a healthy watchdog legitimately heals nothing forever.
+What used to follow from it was the real hole: a clean pass left no trace anywhere, so a watchdog that had been dead for a week looked exactly like a watchdog with nothing to do — the blind-detector shape this whole unit exists to catch, turned on itself. That is closed. Every pass now POSTs a run-ledger row carrying its `checked` denominator ([What it reports](#what-it-reports)), so a missing row reads as a missed run instead of a quiet one — a `checked` denominator rather than a `healed` count, because a healthy watchdog legitimately heals nothing forever. `fluncle-secrets-sync` closed the same way, in the same slice.
 
 ## Why `OnCalendar`
 
@@ -50,6 +50,29 @@ Each pass: enumerate active `fluncle-*.timer` plus `pin-watch.timer` (outside th
 Re-arming is one `systemctl start --no-block` of the service: that gives `OnUnitActiveSec` the reference point it is missing, and the normal cadence resumes from that moment.
 
 A clean pass logs `ok — every active timer has a next elapse` and exits 0.
+
+## What it reports
+
+A clean exit code is the weakest possible signal from a **detector**. This unit legitimately re-arms nothing for months, so `produced == 0` says nothing at all about its health — and a pass that enumerates ZERO timers exits 0 and logs the same reassuring line while being completely blind. That is not hypothetical: a watchdog on the other box ran 897 consecutive times with zero checks and stayed green throughout.
+
+So every pass ends with a JSON summary line on stdout and POSTs it to the run ledger (`record_run`, agent tier) with the run's start, end, and exit code:
+
+```json
+{
+  "checked": 43,
+  "produced": 0,
+  "errors": 0,
+  "queueDepth": 0,
+  "gateState": null,
+  "expectedIntervalMs": 900000
+}
+```
+
+`checked` is the DENOMINATOR — timers examined, counted before any filter — and it is the only field that separates a healthy idle pass from a blind one. `produced` is re-arms performed, `errors` failed re-arms, `queueDepth` the stranded timers this pass found; the ledger alarms on `produced == 0 AND queueDepth > 0`, so finding nothing to do stays silent forever while finding stranded timers and re-arming none does not. `expectedIntervalMs` mirrors this unit's own `OnCalendar`, and `run-events.test.ts` pins the pair against the `.timer` file so a cadence change cannot quietly teach the ledger the wrong freshness budget.
+
+**There is no `ok` in that line, deliberately.** The verdict is `exit_code == 0 && errors == 0` and the Worker computes it from the two facts above; a summary that grades itself is rejected at the edge, because the nightly Sentry sweep exited 0 for eleven nights while printing `{"errors":2,"ok":true}` — a hardcoded literal sitting beside the number that contradicted it.
+
+The agent token for the POST is read off the LIVE container's env via `docker inspect` — the same credential-free read the Discord webhook uses, so this unit still holds no config file and reads nothing from `op`. No token, or the container down, means no POST: absence of a row reads as a missed run, which is the alarm.
 
 ## Verifying it
 
