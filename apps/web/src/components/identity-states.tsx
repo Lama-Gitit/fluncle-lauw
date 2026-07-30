@@ -19,8 +19,8 @@
 //
 // ── THE COVERAGE SET ──────────────────────────────────────────────────────────────────────────
 // The page renders rows ONLY for what the archive covers: ISRC, MusicBrainz, Spotify, Apple Music,
-// Discogs. Deezer and Tidal are absent by design — a "not covered" row is the API contract leaking
-// into a human surface, and it reads as a roadmap promise. The API still answers all five platforms
+// Deezer, Discogs. Tidal is absent by design — a "not covered" row is the API contract leaking into
+// a human surface, and it reads as a roadmap promise. The API still answers all five platforms
 // explicitly, `unsupported` included, because a machine needs the field to exist; the SCOPE of what
 // Fluncle covers is stated once in `/docs/identity` rather than once per recording.
 //
@@ -46,10 +46,12 @@ const IDENTIFIER_ROWS = [
   { key: "mbRecordingId", label: "MusicBrainz" },
 ] as const;
 
-/** The covered platforms, and only those — see the coverage-set note in the file header. */
+/** The covered platforms, and only those, in reading order — where you listen, then where you look
+ *  it up. See the coverage-set note in the file header. */
 const LINK_ROWS = [
   { key: "spotify", label: "Spotify" },
   { key: "appleMusic", label: "Apple Music" },
+  { key: "deezer", label: "Deezer" },
   { key: "discogs", label: "Discogs" },
 ] as const;
 
@@ -57,6 +59,7 @@ const LINK_ROWS = [
  *  string for that action across the app (VOICE.md's Chrome Rule: one action, one label). */
 const OPEN_LABEL: Record<string, string> = {
   "Apple Music": "Listen on Apple Music",
+  Deezer: "Listen on Deezer",
   Discogs: "Open on Discogs",
   MusicBrainz: "Open on MusicBrainz",
   Spotify: "Listen on Spotify",
