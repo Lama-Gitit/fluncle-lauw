@@ -1,6 +1,6 @@
 # Voice: Fluncle
 
-The canonical language definition (the Voice canon) now lives inside the `copywriting-fluncle` skill so the skill installs cleanly anywhere, with no dependency back into this repo.
+The canonical language definition lives inside the `copywriting-fluncle` skill so it installs independently of this repository.
 
 **See [`packages/skills/copywriting-fluncle/references/voice.md`](./packages/skills/copywriting-fluncle/references/voice.md).**
 

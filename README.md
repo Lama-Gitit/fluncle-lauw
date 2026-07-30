@@ -46,8 +46,8 @@ packages/ui           Shared @fluncle/ui design system: the Shadcn base + the No
 packages/video        Remotion kit for per-track social videos (the Nostalgic Cosmos).
 ```
 
-The deployed web app owns the Spotify, Telegram, Turso, and Resend secrets. Every API route is served canonically under `/api/v1/*`. oRPC contract ops — the default for a public or admin HTTP surface — answer at that single prefix only; a bare `/api/*` contract path falls through to the router as a 404. The bare `/api/*` path survives solely for the file-route carve-outs (auth/OAuth redirects, large-body/streaming/media routes, non-JSON emitters), which keep it as a back-compat alias: the same handler object mounted at both paths, not a redirect, so POST bodies survive. Public reads are served by `/api/v1/tracks` (with `since`/`until` discovery windows), `/api/v1/tracks/random`, and `/rss.xml`. Newsletter signups post to `/api/v1/newsletter`, which the web app relays to Resend. The mobile app registers for push via `/api/v1/devices` (`register_device` / `deregister_device`); the web app then relays a notification to the Expo Push Service when a finding or mixtape publishes — best-effort and a no-op until `EXPO_ACCESS_TOKEN` is set, like the Telegram/Last.fm side-channels. Admin mutations are served by authenticated `/api/v1/admin/*` routes. Raycast must keep calling `fluncle`.
-Listener submissions are accepted through public `/api/v1/search` and `/api/v1/submissions` routes, then reviewed through authenticated admin submission routes. Approval still publishes only through the existing admin add flow. Optional web accounts are private overlays on the same Log ID spine: signed-in listeners can sync Galaxy lifetime progress, save findings, see their own submissions, export data, and delete the account without changing anonymous Fluncle.
+The deployed web app owns the Spotify, Telegram, Turso, and Resend secrets. Every API route is served canonically under `/api/v1/*`. oRPC contract ops — the default for a public or admin HTTP surface — answer at that single prefix only; a bare `/api/*` contract path falls through to the router as a 404. The bare `/api/*` prefix is available only to the file-route carve-outs: auth/OAuth redirects, large-body or streaming media routes, and non-JSON emitters. Each carve-out mounts the same handler at both prefixes so POST bodies are preserved. Public reads are served by `/api/v1/tracks` (with `since`/`until` discovery windows), `/api/v1/tracks/random`, and `/rss.xml`. Newsletter signups post to `/api/v1/newsletter`, which the web app relays to Resend. The mobile app registers for push via `/api/v1/devices` (`register_device` / `deregister_device`); the web app then relays a notification to the Expo Push Service when a finding or mixtape publishes — best-effort and a no-op until `EXPO_ACCESS_TOKEN` is set, like the Telegram/Last.fm side-channels. Admin mutations are served by authenticated `/api/v1/admin/*` routes. Raycast must keep calling `fluncle`.
+Listener submissions are accepted through public `/api/v1/search` and `/api/v1/submissions` routes, then reviewed through authenticated admin submission routes. Approval publishes through the authenticated admin add flow. Optional web accounts are private overlays on the same Log ID spine: signed-in listeners can sync Galaxy lifetime progress, save findings, see their own submissions, export data, and delete the account without changing anonymous Fluncle.
 
 ## Private Companion
 
@@ -80,7 +80,7 @@ Root scripts are orchestrated with Turborepo. `oxlint` and `oxfmt` run from the 
 
 ## Environment
 
-Fluncle now has two env surfaces:
+Fluncle has two environment surfaces:
 
 - Operator machines: optional `~/.config/fluncle/.env.production` for production CLI admin commands and `~/.config/fluncle/.env.local` for local development.
 - Web/API: Wrangler secrets in production, and a local `apps/web/.dev.vars` rendered from `apps/web/.dev.vars.tpl` with 1Password for local Worker previews.
@@ -239,7 +239,7 @@ bun run --cwd apps/web db:refresh-dev
 bun run --cwd apps/web preview
 ```
 
-Production keeps using the `fluncle` Turso database through Wrangler secrets. Deploys run through Cloudflare Workers Builds on push to `main`, and migrations apply as part of the deploy step: the Cloudflare **Deploy command** is `bun run --cwd apps/web deploy:cf`, which is the committed script `db:migrate && db:backfill && wrangler deploy`. Prod Turso credentials come from the Cloudflare build/deploy environment, so `db:migrate` runs against `fluncle`. To run a production migration by hand instead, load the production credentials through the `op` CLI from the 1Password item that `FLUNCLE_TURSO_OP_ITEM` points at (the concrete item lives in the private ops runbook), then run `db:migrate` deliberately.
+Production uses the `fluncle` Turso database through Wrangler secrets. Deploys run through Cloudflare Workers Builds on push to `main`, and migrations apply as part of the deploy step: the Cloudflare **Deploy command** is `bun run --cwd apps/web deploy:cf`, which is the committed script `db:migrate && db:backfill && wrangler deploy`. Prod Turso credentials come from the Cloudflare build/deploy environment, so `db:migrate` runs against `fluncle`. To run a production migration by hand instead, load the production credentials through the `op` CLI from the 1Password item that `FLUNCLE_TURSO_OP_ITEM` points at (the concrete item lives in the private ops runbook), then run `db:migrate` deliberately.
 
 To deploy manually from a checkout (builds locally, no migrate):
 
