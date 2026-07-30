@@ -20,11 +20,8 @@ A query is resolved by trying tiers **in order**, stopping at the first that ans
 
 Tier 2 and tier 3 both hand back **entities** — jump targets that sit above the rows. There are five kinds and they are deliberately **one row, one shape, one code path**: the picture, the name, the arrow, and a page to land on — an artist (`/artist/<slug>`), a label (`/label/<slug>`), an album (`/album/<slug>`), a named galaxy (`/galaxies/<slug>`), and a published mixtape whose page IS its log page (`/log/<F-logId>`). `kind` picks the route for the first three; where it does not (a galaxy's plural segment, a mixtape's log page), the row carries an explicit `url`, so no consumer special-cases the route. Search a label and you are offered the label, with its tracks under it; the same is true of a record, a person, a galaxy, and a mixtape — though a galaxy and a mixtape are a **pure jump** (a mixtape is itself one finding; a galaxy has no column filter to list under it), so they carry no track list.
 
-It was not always so. Search shipped before the label and album pages did, so those two came back as a bare `label: …` filter chip — the one thing the reader actually searched for, withheld, because a redirect would have been a 404. That is gone; the chip row now belongs to the model's filters alone (tier 4), which is what it was always for.
+Tier 2 and tier 3 return label and album jump targets when they clear `hubInclusionWhere`. Below-floor entities decline the jump and remain available as filters.
 
-Two rails hold:
-
-- **A label or an album is offered when it clears the shared hub gate.** Search offers exactly the labels/albums the `/labels` + `/albums` hubs and the API list — a certified finding **or** a page that clears the thin-content floor (the same `hubInclusionWhere` helper from `labels.ts`, which reads the two maintained per-entity counters rather than grouping `tracks ⋈ findings` on the search hot path). This replaced the old certified-only guard when the unified hub index shipped: a catalogue-only label with enough renderable tracks now has a real page, so withholding it would be the lie. A below-floor imprint (the [catalogue crawler](./catalogue-crawler.md) mints a `labels` row for every one it walks past) still declines the jump and falls back to the filter it always was — never a dead link.
 - **The entity reads are archive-sized, not catalogue-sized** — a label/album is bounded by that floor, and galaxies and mixtapes are a handful today, dozens at most — so the exact/prefix match stays a cheap read however deep the catalogue gets. A galaxy resolves only when it is **named and not retired**; a mixtape only when it is **published**.
 
 ### An artist answers to every name
@@ -38,7 +35,7 @@ Two rules carry the trust and the tie:
 
 ### And so does a label
 
-`label_aliases` is the structural twin of `artist_aliases` (see [the label entity](./label-entity.md)), and it was invisible to search: a `merge_label` folds the losing name in as a `confirmed` alias, `ensureLabel` consults that fold before minting a row — and then a reader typing the folded spelling found nothing. The label read now resolves through it exactly as the artist read does, on the same code path and under the same `predicate` (exact in tier 2, prefix in tier 3), with the primary name winning a tie the same way. The **filter** path folds too: a `label` filter whose slug seek misses falls back to `labels.ts`'s own confirmed-alias resolver — the one `ensureLabel` uses — so the read side and the write side answer "which label is this spelling?" from one place, in two indexed seeks rather than a join.
+Label search resolves confirmed `label_aliases` in both exact and prefix tiers, with the primary name winning ties. Filter resolution uses the same confirmed-alias resolver.
 
 Two rules diverge from the artist precedent, and both are load-bearing:
 
@@ -53,9 +50,7 @@ The schema is the safety property. A model that tries to hand back tracks hands 
 
 ### A filter's name becomes an id before it becomes SQL
 
-A filter carries a **name** — a name is what a reader types, and a name is all the model is allowed to emit. Compiled straight against the raw columns, that name cost a full pass over a growing table on the single most common search there is: `artist: "Netsky"` was `lower(tracks.artists_json) like '%netsky%'`, which had to read and lower-case every track's stored JSON credits to answer it. The label and album filters wrapped their columns the same way, and the key filter wrapped `tracks.key`, so the btrees sitting right there went unused.
-
-The data model had already done that work. So the names are resolved **once**, at the top of the read (`resolveFilterEntities`), against the small entity tables — and `compileFilters` turns a resolved name into a seek: the artist into `track_artists.artist_id` (the same edge `/artist/<slug>` lists an artist's catalogue by), the label and the album into the indexed `tracks.label_id` / `tracks.album_id` pointers. The artist read is alias-tolerant, on the same trust rule as the entity tier, so an AKA filters exactly as the primary name does. Every tier that executes filters inherits this, including the model's — a name it emits is resolved by a database lookup, never by a model call, so nothing moves onto the hot path.
+Resolve filter names once against entity tables, then compile indexed ID predicates: artist through `track_artists.artist_id`, and label or album through `tracks.label_id` or `tracks.album_id`.
 
 **And a name the graph does not hold falls back to the string match.** Resolution requires the entity's maintained `renderable_track_count` to be above zero — the stored mirror of the very edge the filter is about to seek. An artist whose crawled catalogue the edge backfill has not reached, or a crawler-minted imprint with nothing pointing at it, therefore does not resolve, and the read compiles the substring/equality clause it always did. That is deliberate: a seek against an entity with no edges would return a confident, silent **empty**, which is a worse answer than a slow query. The fallback is the degradation contract holding at the level of one filter.
 
@@ -92,7 +87,7 @@ All three are from [docs/local-database.md](./local-database.md), all three are 
 
 1. **Rank in SQL** (`vector_distance_cos … order by … limit N`). Never pull embeddings into the isolate — that is how a query silently grows toward OOMing the 128 MB Worker.
 2. **Bind the probe as a raw BLOB** (`toVectorProbe`), never as a JSON string: 1,883 ms vs 26,700 ms at 100k on hosted. Locally, identical either way.
-3. **Never `CREATE INDEX … libsql_vector_idx`.** It wedged hosted Turso's write path for 20+ minutes and silently builds an EMPTY index locally. The ratified shape is an exact scan with a btree pre-filter.
+3. Do not create `libsql_vector_idx` on a populated table: hosted creation can block writes and local creation can yield an empty index. Use an exact scan behind a btree pre-filter.
 
 ## The catalogue rule
 

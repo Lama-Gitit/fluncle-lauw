@@ -1,6 +1,6 @@
 # Live deck identity — reading what Rekordbox has loaded, and resolving it to a finding
 
-The live show has two orthogonal questions, and it is a mistake to solve them with one signal:
+The live show combines two orthogonal signals:
 
 - **IDENTITY** — _what_ track is on a deck. The DJ's intended track name lives in exactly one place before a single note is heard: Rekordbox's deck header. We read it with native macOS OCR.
 - **CHANGE** — _which_ deck went live, and _when_. That is the crossfader/channel-fader state, which the MIDI mixer-state feed already solves (a separate concern, a separate PR).
@@ -70,7 +70,7 @@ Neither can be the identity: both are nullable, both disagree with the archive i
 
 Rekordbox may display the key as **Camelot** (`6A`) or **Classic** (`Gm`) depending on a user preference; the resolver accepts both, plus Fluncle's sharp-spelled scale text (`"G major"`, `"A# minor"`). Everything reduces to a 0–11 tonic pitch class (enharmonics share a class, which is what a tonic-only compare wants).
 
-Verified against the table above — `5A` must be C minor and `6A` must be G minor, which is exactly how it was validated live:
+The canonical Camelot mapping is:
 
 - minor `1A..12A` → Ab, Eb, Bb, F, **C**, **G**, D, A, E, B, F#, Db
 - major `1B..12B` → B, F#, Db, Ab, Eb, Bb, F, C, G, D, A, E

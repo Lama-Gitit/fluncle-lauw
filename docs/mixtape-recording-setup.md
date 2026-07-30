@@ -8,7 +8,7 @@ Your pre-flight checklist before hitting the decks: how to wire the audio/video 
 
 **PC MASTER OUT good. Aggregate Device bad.**
 
-Rekordbox sends its master to one place. The trap is thinking you must choose between the FLX4 (so you can hear it) and BlackHole (so OBS can capture it). You don't: Rekordbox's **PC MASTER OUT** feature duplicates the master to your DJ gear _and_ the computer's audio at the same time. A macOS **Aggregate Device** is the wrong tool — it breaks the FLX4's headphone cue and starves BlackHole. (On 2026-06-28 an Aggregate Device silently replaced PC MASTER OUT and a whole 48-minute set recorded as a mono room-mic, because BlackHole got nothing and only the laptop mic caught the speakers.)
+Use Rekordbox PC MASTER OUT to duplicate the master to the DDJ-FLX4 and BlackHole. An Aggregate Device breaks the controller cue and can leave the BlackHole capture silent.
 
 ## Signal flow (what "wired correctly" looks like)
 
@@ -51,7 +51,7 @@ Install BlackHole 2ch (`brew install blackhole-2ch`, reboot if it was a fresh in
 - **Output → Streaming → Audio Track = `3`** (Twitch live = music + your voice).
 - **Output → Streaming → Twitch VOD Track = `2`** (mic-only) — the live stream stays full via Track 3, but the saved VOD uses the voice-only track so Twitch won't copyright-mute the archive. Optional (the VOD then has your voice but no music); skip it to just accept the odd muted section.
 - Output → Audio → **Audio Bitrate 320** on the recorded tracks (Twitch max, worth it for music).
-- **Video — Output (Scaled) Resolution = `1920×1080`** (Settings → Video), and Base (Canvas) `1920×1080` too (60 fps + Bicubic fine), both cameras sourced at 1080p. If this is left at `1280×720` the whole set bakes to 720p no matter how sharp the cameras are, and the 9:16 clips come out soft (Mixtape #1's bug).
+- **Video — Output (Scaled) Resolution = `1920×1080`** (Settings → Video), and Base (Canvas) `1920×1080` too (60 fps + Bicubic fine), both cameras sourced at 1080p. A 720p recording produces soft 9:16 derivatives.
 - **Recording master encoder** (Output → Recording → Video Encoder): set a **dedicated `Apple VT H264 Hardware Encoder`** — do **not** leave "(Use stream encoder)", which caps the master at the ~6000 kbps Twitch bitrate. Then **Rate Control = `CBR`, Bitrate = `40000`** (40 Mbps ≈ 18 GB/hr): a pristine 1080p60 master that survives the downstream re-encodes, at near-zero CPU (hardware media engine) while you stream + DJ.
   - **NOT ProRes** — a 60-min set is 100–200 GB and would break the R2 → box → clip-cut pipeline + iCloud.
   - **NOT HEVC / AV1** — H.264 keeps browser `set.mp4` playback + the ffmpeg clip-cut + Cloudflare Media Transformations happy (AV1 is greyed out for Hybrid MOV anyway).
@@ -59,12 +59,11 @@ Install BlackHole 2ch (`brew install blackhole-2ch`, reboot if it was a fresh in
 - Output → Recording → Recording Format `.mov` (Hybrid MOV) or `.mp4`. Audio Encoder CoreAudio AAC.
 - Keep the **same sample rate end to end** — OBS is at 48 kHz, so set BlackHole (Audio MIDI Setup) and Rekordbox to 48 kHz too, to avoid resample crackle/drift.
 
-## Pre-flight (every single set — 10 seconds, non-negotiable)
+## Pre-flight before every set
 
-1. Play a track in Rekordbox.
-2. Watch the **OBS "Audio Input Capture" meter bounce.** Flat meter = dead route → fix before you play. Never record on faith; this one glance would have caught the 2026-06-28 silent-BlackHole set.
-3. Confirm you hear **master on the speakers + cue in the headphones** through the FLX4.
-4. **Belt-and-braces:** also hit Rekordbox's **REC** button (Preferences → Recordings sets the folder). It records the master straight to a clean stereo WAV with zero routing in the path — your guaranteed master if OBS misbehaves.
+1. Play a track and confirm that the OBS Audio Input Capture meter moves before recording.
+2. Confirm you hear **master on the speakers + cue in the headphones** through the FLX4.
+3. **Belt-and-braces:** also hit Rekordbox's **REC** button (Preferences → Recordings sets the folder). It records the master straight to a clean stereo WAV with zero routing in the path — your guaranteed master if OBS misbehaves.
 
 ## After the set (produce the deliverables)
 

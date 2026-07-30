@@ -41,7 +41,7 @@ Generated art is quantized to this palette (mirrors `apps/web/src/game/palette.t
 
 ## Generating a sprite (Nano Banana / Gemini image-gen)
 
-The hero ship and Earth were made with Gemini image generation ("Nano Banana") and hand-quantized to the ramp; the frontier sprites follow the same workflow.
+Generate hero and frontier sprites with the shared Gemini workflow, then hand-quantize them to the canon ramp.
 
 1. **Provide the key from your secrets manager.** Export `GEMINI_API_KEY` into the environment before running (read it from your password manager / secrets store; never commit a key or paste it into a file). In an interactive terminal that means signing in to the secrets CLI first, then exporting the value for the session.
 2. **Prompt per sprite.** Use a tight prompt: small 8-bit / NES-era **pixel art**, **transparent background**, the subject and POV from the roster above, the exact canon hex colors, no text, no drop shadow, no film grain, a single warm light source (no second gold). Example (Roadster): _"16×9 pixel-art sprite of a sleek derelict sports car tumbling in space, seen at a slight angle, transparent background, cream body (#f4ead7/#b7ab95) with a thin re-entry-red (#ff6b57) accent stripe and dark wheels, NES palette, no text, no shadow, no grain."_
@@ -51,9 +51,7 @@ The hero ship and Earth were made with Gemini image generation ("Nano Banana") a
 
 The current scripted pipeline is the **`fluncle-sprites` skill's** `packages/skills/fluncle-sprites/scripts/generate_sprite.py` — the system-wide sprite doctrine (the fixed rails, the per-sprite palette subset, the deterministic key → crop → resize → quantize → outline post-step), and it writes straight to `packages/sprites/assets/<collection>/<id>.png`, the source of truth. Use it; see [packages/skills/fluncle-sprites/SKILL.md](../packages/skills/fluncle-sprites/SKILL.md) for the rails and the run command.
 
-An older script, `packages/media/scripts/generate-galaxy-sprites.py`, still exists (same generate → key → fit → quantize idea) but **writes into `apps/web/public/galaxy/` — the generated mirror**, so anything it produces is untracked and gets overwritten on the next build. If you run it, move its output into `packages/sprites/assets/galaxy/` before doing anything else.
-
-The current `roadster.png` / `ufo.png` / `asteroid.png` are a first pass; regenerate or hand-touch any of them, then view in a driven browser before calling them done.
+Use the `fluncle-sprites` skill's generator, which writes to the package source of truth. `packages/media/scripts/generate-galaxy-sprites.py` writes to the generated public mirror and must not be used as the final asset path. View every regenerated sprite in the running game before shipping.
 
 ## Audio: the amen intro
 

@@ -6,7 +6,7 @@ What differs is mostly what is **absent**. A label carries an operator control (
 
 ## The data model
 
-`tracks.album` stays exactly what it has always been: **the raw string the vendor handed back on the add**, free text, never rewritten. It is the audit trail and the re-normalization input. The `albums` table is its normalized twin, related by slug:
+`tracks.album` is the immutable raw string captured from the vendor. The `albums` table is its normalized twin, related by slug:
 
 ```
 slugify(tracks.album) = albums.slug
@@ -21,7 +21,7 @@ A record's finding count is **derived**, never stored — the denormalization-dr
 
 ### The graph pointer (`tracks.album_id` / `tracks.label_id`)
 
-Both entities now carry an **indexed pointer from `tracks`** (`album_id`, `label_id`), which is the follow-up `label-entity.md` recorded when the label entity landed. `tracks.album` / `tracks.label` stay the raw captured strings regardless — the pointer is an **addition, never a replacement**.
+Tracks carry indexed `album_id` and `label_id` pointers for graph-page seeks. The raw `tracks.album` and `tracks.label` strings remain immutable normalization inputs.
 
 It exists because the PUBLIC page asks a question the admin surface never did. Folding slugs in TypeScript is fine over the FINDINGS join — that is bounded by how many tracks Fluncle has certified, a `GROUP BY` of tens of rows. But a graph page also asks _"every track on this record, including the ones Fluncle never certified"_, and answering that by folding the whole catalogue inside the Worker is exactly the shape AGENTS.md forbids (never scan or rank a growing table in the isolate). An equality on an indexed entity id is a seek, at any catalogue size.
 
@@ -29,19 +29,7 @@ It exists because the PUBLIC page asks a question the admin surface never did. F
 
 ## How a row gets minted
 
-Two idempotent write paths, and — unlike the first cut — the album is now a **catalogue-scale entity**, minted like `labels` rather than only off a finding:
-
-1. **The publish path** — `publishTrack` calls `linkTrackToAlbum` / `linkTrackToLabel`, minting the entity off a certified finding (folded on the **slug**) and stamping the track's pointer. Best-effort and purely additive, so a failure never blocks an add.
-2. **The catalogue crawler, INLINE** — `expandRelease` calls `ensureAlbum(name, releaseGroupMbid)` for every release it walks, folding the album on the **MusicBrainz release-group MBID** (the stable identity over a record's pressings; the slug is the fallback when MusicBrainz has no release group), then stamps `album_id` on the tracks it just wrote. So a crawled record earns its album entity off the bat — the crawler is to albums what it already is to labels.
-
-The old **deploy-time reconcile** (`scripts/backfill-albums.ts` in `db:backfill`) is gone: the album edge is written inline now, so there is nothing to reconcile on every push. Its one-off descendant, `scripts/backfill-album-graph.ts`, is **operator-run once** to catch history up (mint off findings + link existing catalogue tracks by slug); it is in no deploy step. A legacy album row carries a `NULL` `release_group_mbid` until the running crawler's **adopt** path fills it — the next time it walks a release in that group, `ensureAlbum` resolves the album by slug and stamps the mbid in (fill-empty-only), so the fold-on-mbid self-heals through the live crawler rather than a one-shot MusicBrainz sweep.
-
-What this changes, and what it does **not**:
-
-- **The `albums` TABLE now grows with the catalogue** — one row per crawled release group, exactly as the crawler mints a `labels` row per discovered label (there are simply far more albums than labels). The old "mint only off a finding" bound is retired for albums.
-- **The `/albums` index is ONE catalogue-scale list.** `listAlbumsHubPage` lists every record Fluncle holds — certified findings and the wider catalogue alike — in one alphabetical, `?page=N`-paginated list (see [_The unified index_](#the-sitemap-carries-every-page-the-hub-is-one-unified-index)). It never ranks a growing table in the isolate: the gated scan pages a bounded slice and the certified flag / counts join only the paged rows.
-- **A crawl-minted album is PUBLIC on its content, exactly as a discovered label is.** A findings-free album with a row renders its `/album/<slug>` page (a tracklist), and once it clears the thin-content floor it enters the sitemap too — reachability follows the same rule the label page has always had. There is no certified-finding gate on the album surface: a slug with no `albums` row 404s, a row renders, and the thin-content floor (findings PLUS the quieter catalogue rows) decides whether it indexes. The catalogue-group heading links to `/album/<slug>` whenever the record has an album entity. A **certified-finding** album is unchanged throughout.
-- **The quieter rows are unchanged in spirit.** An uncertified track on a record with a certified finding appears on that record's page; the crawled TRACK still earns no coordinate, no `/log` URL, and no name — the unnamed tier is intact.
+Albums are catalogue-scale entities minted through two idempotent paths: publishing links a certified finding, and `expandRelease` connects or creates the album by MusicBrainz release-group MBID, with the slug as fallback. `scripts/backfill-album-graph.ts` links rows that lack graph pointers. Catalogue-minted albums participate in the public graph while uncertified tracks remain in the unlit register.
 
 ## The public surfaces
 
@@ -51,7 +39,7 @@ What this changes, and what it does **not**:
 
 A graph page exists as soon as the entity does. A label the crawler discovered and Fluncle has certified nothing on **still has a `/label/<slug>` page**, and a label with 700 crawled releases and zero findings is a genuinely useful one — an honest record of what that label put out. Refusing to serve it throws away the entire point of having crawled it.
 
-This reverses the rule that shipped first ("zero findings ⇒ the page 404s"). That rule was aimed at a real bug and hit the wrong target. Measured against a 10,800-row synthetic catalogue, **eight discovered-label pages were live and indexable**, and each one was a wall of Spotify outlinks under the heading _"Nothing logged off this one yet."_ That is a doorway page by Google's own definition — but what makes it one is the **hollow rendering**, not the page's existence. A page whose stated subject is a thing that is not on it is a doorway; a page that is honestly about the tracks it carries is a page.
+A graph page exists when its entity exists. Render each section only when it has content, and use the thin-content gate over total renderable tracks to keep stubs out of the index.
 
 **So the page stays, and the hollow rendering goes.** Every band on a graph page is **conditional**: it renders only when it has content, and renders _nothing_ — no heading, no empty state, no apology — when it does not. No findings ⇒ no findings section, and no "nothing logged yet" line in the masthead either. The page is then simply about what it has. The rule, and it is the load-bearing one:
 
@@ -59,7 +47,7 @@ This reverses the rule that shipped first ("zero findings ⇒ the page 404s"). T
 
 What keeps a **stub** out of the index is the thin-content gate below, and it counts **total** renderable tracks, never findings — because a page is thin or not thin on what it _renders_, never on who wrote it.
 
-**The rows are bounded — and at catalogue scale they are also GROUPED.** The seek is always indexed, so the SCAN is bounded however big the catalogue gets; the RESULT SET is what bit. On a 10,800-row catalogue an uncapped `/label/hospital-records` served **4.34 MB of HTML** — 3,000 rows through the markup, again through the hydration payload, a third time as `MusicRecording` JSON-LD. A flat cap fixed the bytes but left a wall: a crawled label with 700 releases from 30 artists is a discography, and a flat list of it is a dump, not a page. So the two big pages are **grouped**, and the bound moves with the grouping rather than disappearing (`lib/server/catalogue-groups.ts`):
+Graph-page result sets are bounded and grouped. Artist pages group by record; label pages group by artist with record subsections. SQL applies the group-page and per-group limits before rows reach the isolate.
 
 - **`/album/<slug>`** is one record, so it stays the flat tracklist it always was — at most `GRAPH_PAGE_CATALOGUE_LIMIT` (100) quieter rows, newest release first, the true total counted in SQL (`count(*) over ()`) for the gate.
 - **`/artist/<slug>`** groups its quieter rows into **records** (album name + tracklist); **`/label/<slug>`** groups them **by artist**, with record sub-sections inside each. The bound becomes a **page of groups** — at most `GRAPH_GROUP_PAGE_SIZE` (12) groups, ordered and windowed in SQL with a crawlable `?page=N` pager for the rest — plus a **per-group row cap** (`GRAPH_GROUP_TRACK_LIMIT`, 20, via a `row_number()` window), so one prolific artist cannot blow the page's budget and a group that hits the cap links to its own page for the rest. The hard ceiling is `GRAPH_GROUP_PAGE_SIZE × GRAPH_GROUP_TRACK_LIMIT` rows, by construction, whatever the label's size. Everything aggregates and ranks in SQL — grouping 30,000 rows in the isolate is exactly the OOM shape AGENTS.md forbids. Each group **collapses by default** (a Shadcn Accordion whose panel carries `hidden="until-found"`, so the collapsed rows stay in the server-rendered DOM — crawlable and find-in-page-able — while the page reads as a map, not a wall). Sort is alphabetical (default, stable under a growing crawl) or by release date; `tracks.release_date` is nullable and **undated sorts last** under both, never silently dropped. A group **heading names a real entity** (a record, an artist) — never the tier, which has no public name; the nameless bucket (tracks whose record is unknown) renders as bare rows with no heading at all. The pager's canonical is self-referencing per page but sort-collapsing (`?page=2`, never the sort param), so order-variants of one page do not dilute each other.
@@ -93,17 +81,15 @@ This is the render half only: it does not stamp anything or widen the catalogue'
 
 A page indexes (and enters the sitemap) only past **`ALBUM_INDEX_MIN_TRACKS` / `LABEL_INDEX_MIN_TRACKS` = 3 renderable tracks** — its findings **plus** the quieter rows, because both are real content on the page. Below it the page still serves 200 (deep links, link equity) but is `noindex, follow` and stays out of the sitemap.
 
-**It counts TOTAL content, never findings.** That is the whole point: it is the one gate, and it is the gate that replaced the 404. A label with two crawled rows and nothing else is a stub and stays out of the index; a label with 900 is a page and goes in. Neither answer depends on whether Fluncle has certified anything, because _the crawler's rows are content too_.
+**It counts TOTAL content, never findings.** It is the single indexability gate. A label with two crawled rows and nothing else is a stub and stays out of the index; a label with 900 is a page and goes in. Neither answer depends on whether Fluncle has certified anything, because _the crawler's rows are content too_.
 
 The gate counts the entity's **true** catalogue total, never the rendered 100-row slice — a 3,000-row label and a 100-row one must not read as the same page to it.
 
-**Why the floor is 3, and not higher.** Three is low for a _catalogue-only_ page, and it is tempting to raise it — but the floor is shared with pages that carry real findings, and raising it would demote them. `/label/medschool` has 3 findings today: three coordinates, three notes, three covers, Fluncle's voice frame. That is unambiguously a page, and any floor above 3 silently `noindex`es it. Weighting a finding heavier than a crawled row would let both bars rise, but that reintroduces "who wrote it" into a gate whose entire job is to ask "what is on it" — so the floor stays 3 and stays honest. If a harder bar for catalogue-only pages is ever wanted, it is a _weighted_ gate and a deliberate decision, not a bump to this constant.
-
-The threshold matches `ARTIST_INDEX_MIN_FINDINGS`'s value; what differs is WHAT is counted, and that is deliberate: **an album Fluncle found one banger on is a thin page today and a genuine tracklist page once the rest of the record is there.** Today every album in the archive is a single, so no album detail page clears the floor — the gate is working, not broken. The hubs (`/albums`, `/labels`) are listed unconditionally, like `/artists`: a hub's content is the whole list, so the per-page gate says nothing about it.
+The floor is 3 because it is shared by catalogue-only and finding-bearing pages. Raising the unweighted threshold would exclude valid pages with three substantial finding records. A stricter catalogue-only policy requires a separate weighted gate.
 
 ### The sitemap carries every page; the hub is one unified index
 
-**Ratified 2026-07-20 (operator ruling), superseding the earlier two-section design.** The old ruling made each hub's TOP section Fluncle's own editorial list (_"every label I've pulled a banger off"_) with the crawler's quiet tail in a second _"More &lt;entities&gt;"_ section below it. That is consciously reversed: `/labels`, `/albums`, and `/artists` are each now **ONE unified catalogue-scale index** — a true browse page like `/tracks`, one node type up — listing **every entity Fluncle holds**, certified findings and the wider catalogue alike, in a single alphabetical, `?page=N`-paginated list (`listLabelsHubPage` / `listAlbumsHubPage` / `listArtistsHubPage`, over the shared `listHubPage` engine).
+`/labels`, `/albums`, and `/artists` are unified catalogue-scale indexes. Each lists every entity Fluncle holds in one alphabetical, `?page=N`-paginated surface.
 
 A certified entity is distinguished **visually, never verbally** (DESIGN.md's Unlit Rule, extended): its NAME text takes the **certification light** (Eclipse Gold); an uncertified name keeps the plain ink. There is **no badge, no tier heading, no "N findings" caption** — the tile counts RENDERABLE tracks uniformly (_"N tracks"_, the superset noun) for every row. The gold is text, not a glow; hover carries a neutral Dust lift for every tile (no gold ever lands on an uncertified row) and only the focus ring stays canonical Eclipse. Certified entities are sparse per alphabetical page, so the One Sun budget holds.
 

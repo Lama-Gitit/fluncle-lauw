@@ -19,13 +19,13 @@ Per finding, in `found.fluncle.com/<log-id>/`:
 - **`footage.mp4`** — square `1920×1920`, audio, **clean (no text overlay)**. The source master. Nothing plays it as a square; MT crops it to portrait or landscape and strips its audio on demand. It must be clean because baked text cannot survive a crop (see below).
 - **`footage.social.mp4`** — portrait `1080×1920`, audio, **baked text** (TypePlate + CloseCard). The playable social cut: the homepage Stories experience, YouTube as-is, and TikTok with audio stripped.
 
-`footage-silent.mp4` is retired — TikTok's silent upload is `footage.social.mp4` served through an `audio=false` MT URL, so the silent variant no longer exists as a file.
+TikTok receives `footage.social.mp4` through an `audio=false` Media Transformation; no separate silent master is stored.
 
 `cover.jpg` (profile-grid cover) and `poster.jpg` are unchanged; the `/log` poster can also be derived from a master via MT `mode=frame`.
 
 ### Render-flag provenance (`render.json` `variants`)
 
-**Plate-era additions (2026-07-05).** Plate-lane bundles carry two more artifacts beside the masters: **`plate.png`** (the photographic subject the shader treats) and **`plate.background.png`** (the subject-removed far layer for parallax), uploaded to R2 BEFORE composing so the composition — and any re-render or live replay — samples the durable `found.fluncle.com/<logId>/plate*.png` URLs. Two framing consequences of the two-master model for plate compositions: the square master must cover-fit a portrait plate (it center-crops top/bottom), and the site's Stories player shows an MT portrait crop OF that square — a double crop ≈ a center-zoom. The doctrine's safe-zone law (fluncle-video cookbook, §the plate lane) exists for exactly this: the subject's essential silhouette + landing point must survive the center-crop chain.
+Plate-lane bundles include `plate.png` and `plate.background.png`, uploaded before composition so re-renders and live replay use durable `found.fluncle.com/<logId>/plate*.png` R2 URLs. Two framing consequences of the two-master model for plate compositions: the square master must cover-fit a portrait plate (it center-crops top/bottom), and the site's Stories player shows an MT portrait crop OF that square — a double crop ≈ a center-zoom. The doctrine's safe-zone law (fluncle-video cookbook, §the plate lane) exists for exactly this: the subject's essential silhouette + landing point must survive the center-crop chain.
 
 The two masters are the **same composition + props** rendered with **different flags** — `footage.mp4` is `{ aspect: "square", hideOverlay: true }` and `footage.social.mp4` is the portrait default `{ aspect: "portrait", hideOverlay: false }`. Those flags live in the render scripts, not the bundle, so the stored bundle alone would naively re-render the portrait cut. The bundle `render.json` therefore records a `variants` map keyed by output filename → its render flags:
 
@@ -90,24 +90,11 @@ The full presigned upload field set (`footage`, `footage-social`, `footage-notex
 
 ## Re-shipping and cache purge
 
-A re-render ships to the SAME R2 keys, but MT caches each derived rendition keyed on its transform URL (which embeds the source URL) — in MT's own internal cache layer (`cf-cache-status: BYPASS`), which the zone purge API cannot evict. So re-shipping a new `footage.mp4` and purging only the master leaves every player serving the OLD clip from cached renditions (verified live on the 027.9.5H re-render). `apps/web/src/lib/media.ts` handles the eviction with two mechanisms:
+Media Transformation renditions retain their own cache keys after a master is overwritten. Re-key them through the `?v=<vintage>` token; zone purge handles only the bare R2 objects. `apps/web/src/lib/media.ts` handles both mechanisms:
 
 - **The `?v` vintage token — the only reliable rendition eviction.** Every transform source carries `?v=<vintage>`: per finding, the epoch of `videoSquaredAt` (`videoVersion()`; clips use `updatedAt`), which every squared re-upload bumps — a normal re-ship mints new transform URLs and MT derives fresh, with nothing to purge. Masters that predate the two-master layout fall back to the catalogue-wide `TRANSFORM_VERSION` constant; bumping that constant re-keys every legacy rendition at once. R2 ignores the query string, so only the cache key changes, never the bytes fetched.
 - **`videoPurgeUrls` + the zone purge-by-URL API — the bare-object eviction.** The bare R2 object URLs (both masters, `poster.jpg`, `cover.jpg`; 4h max-age) carry no `?v`, so `videoPurgeUrls` builds the exhaustive URL set for a re-shipped finding and the zone purge evicts them at the edge. A hostname-scoped purge of the media zone is the blunt manual fallback when the exact URL set is in doubt — it clears the zone edge, though never MT's internal rendition cache, which only the vintage token re-keys.
 
-## Migration (the gradual, per-finding cutover — done)
+## Layout compatibility
 
-This rollout has landed; the steps below are the historical record of how it ran. Redefining `footage.mp4` from portrait to square was **stateful and gradual** — the square backfill renders per-track over time, so at any moment some findings carry the old portrait `footage.mp4` and some carry the new square. A finding's layout is therefore a **per-finding signal**, not a global flag: the `video_squared_at` column on `findings` (an ISO timestamp). Set → `footage.mp4` is the clean square master and `footage.social.mp4` rides alongside; null → the legacy single-file layout (`footage.mp4` is the old portrait+text cut). The video finalize/upload path stamps it when a bundle carries BOTH the square `footage.mp4` and the portrait `footage.social.mp4` (the CLI signals `squared`); the footage→social rename migration never stamps it, because that copy alone doesn't make `footage.mp4` square.
-
-Consumers read the signal and fall back, so deploying the consumer code changes nothing for un-migrated findings:
-
-- `media.ts` exposes the square-crop helpers (`videoCrop` → `fit=cover` portrait/landscape) + `videoAudioStripped` (`mode=video,audio=false,width=1080`) + `socialVideoUrl`; callers reach for the crops/social cut **only when `videoSquaredAt` is set**.
-- `/log` and `radio.fluncle.com`: squared → an MT centre-crop of the square (clean, the page owns the chrome); un-squared → today's `footage.mp4` portrait rendition. Radio additionally strips the audio (`videoAudioStripped`) so its only sound is the observation, and plays only squared+observed findings (the `get_random_radio_track` eligibility filter).
-- Stories / YouTube / TikTok: squared → `footage.social.mp4` (TikTok via `audio=false` MT); un-squared → `footage.mp4` (its old portrait+text cut) + `footage-silent.mp4`.
-
-The ordered rollout that ran (the one-time copy script was removed once it had run, per the throwaway-script discipline):
-
-1. **One-time copy** (a throwaway `--dry-run`-first script, since deleted): for every finding with a video, server-side R2-copy `footage.mp4` → `footage.social.mp4` (no re-render — the old `footage.mp4` was already the social cut's spec). Idempotent; did NOT set `video_squared_at`.
-2. **Deploy the consumer code**: the signal-gated `media.ts` + players + publish push + the `footage.social` presign allow-list entry. With every finding now carrying a `footage.social.mp4` but no `video_squared_at`, every consumer still served the legacy path — a no-op deploy by design.
-3. **Backfill the squares**, per-track over time: re-render each finding's square (`aspect=square`, clean) and `fluncle admin tracks video` it alongside the portrait social cut, which stamps `video_squared_at`. Each finding lit up the new layout the moment its square landed; the catalogue converted gradually with zero broken intermediate states.
-4. **Cutover cleanup** (after the catalogue was fully squared): `footage-silent.mp4` is now retired — dropped from the presign allow-list, no longer shipped, and the legacy fallback branches removed.
+`video_squared_at` is the per-finding layout signal. When set, `footage.mp4` is the clean square master and `footage.social.mp4` is the portrait social cut. When null, consumers use the single-file compatibility layout. Upload finalization sets the signal only when both two-master artifacts are present.

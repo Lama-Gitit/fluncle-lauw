@@ -22,7 +22,7 @@ API, RSS, and MCP are free riders on the web onion — they are just paths on `w
 
 ## Owner decisions to settle before building
 
-- **SSH onion in v1, or a fast-follow?** The web onion plus `Onion-Location` captures essentially all the value and closes five of the six Tor checklist boxes. The rave/SSH onion is the thinnest-value unit (a public, no-auth terminal toy over Tor); it is nearly free since it rides the same daemon, so "do it for completeness" is defensible, but it is a genuine choice. Maurice decides.
+- **SSH onion in v1, or a fast-follow?** The web onion plus `Onion-Location` captures essentially all the value and closes five of the six Tor checklist boxes. The rave/SSH onion is the thinnest-value unit (a public, no-auth terminal toy over Tor); it is nearly free since it rides the same daemon, so "do it for completeness" is defensible, but it is a genuine choice. Obtain operator approval before enabling the optional SSH onion.
 - **Key custody item names.** The onion private keys go to the configured 1Password items (see the ops runbook note), matching the custody used elsewhere. Confirm the item names per that note.
 - **Same box vs. a dedicated box.** Recommended: the existing public-edge box ($0 marginal). A dedicated box (~€4–5/mo) buys only blast-radius isolation and is paid infrastructure, so it needs an explicit yes.
 - **Vanity prefix?** Optional novelty flex (mine a readable prefix with `mkp224o` before first start). Costs local CPU wall-clock, no money. Default: no.
@@ -99,7 +99,7 @@ sudo systemctl status tor --no-pager
 
 ## 6. Ship the `Onion-Location` header (Unit C — repo + normal deploy)
 
-This is the only repo change, and it is **done and live in prod**. `appendOnionLocation` (`apps/web/src/lib/server/agent-discovery.ts`) advertises the onion twin on every HTML response, per-path, gated to `text/html` so the JSON/XML surfaces (`/api/v1/*`, `/rss.xml`, `/mcp`) stay clean. The web onion address is set in the `WEB_ONION_HOSTNAME` module constant, so the header ships on every HTML page (and `@fluncle/registry`'s `subdomain.onion` is non-`pending`).
+`appendOnionLocation` (`apps/web/src/lib/server/agent-discovery.ts`) advertises the configured onion twin on HTML responses while `/api/v1/*`, `/rss.xml`, and `/mcp` remain clean. `WEB_ONION_HOSTNAME` is the canonical hostname setting.
 
 **Rollback only.** The constant doubles as the kill switch: `WEB_ONION_HOSTNAME` reads as a `56-char host` (no scheme, no trailing `.onion`); set it back to the empty string (`""`) and push, and the helper becomes a no-op so nothing is advertised. Workers Builds deploys either change (watch for build coalescing if pushing rapidly). No DNS record, no Cloudflare dashboard toggle — an onion has no DNS and the header is pure code.
 
@@ -144,10 +144,7 @@ Tor Browser handles the website onion (it shows the ".onion available" pill on d
 # Debian/Ubuntu: sudo apt install tor && sudo systemctl enable --now tor
 ```
 
-Two footguns to keep in mind:
-
-- A standalone `tor` daemon uses SOCKS port **`9050`**; the Tor Browser bundle uses **`9150`**. The wrong port is the single most common failure.
-- The `nc -X 5` SOCKS5 form needs **`netcat-openbsd`** (macOS's stock `nc` works; GNU netcat does not support `-X`).
+A standalone Tor daemon uses SOCKS port `9050`; Tor Browser uses `9150`. The `nc -X 5` command requires `netcat-openbsd` or the compatible macOS `nc`.
 
 A persistent `~/.ssh/config` block lets the user just type the onion:
 

@@ -4,17 +4,6 @@ Fluncle's audio pipeline has three stages, and all three are **measurements of a
 
 That distinction is the whole of this document. It is what lets the pipeline work a **catalogue track** — a `tracks` row with no `findings` row ([docs/the-ear.md](./the-ear.md)) — and it is what stops the pipeline from ever saying a word about one.
 
-## What the split left behind
-
-`tracks` and `findings` were split in two ([docs/track-lifecycle.md](./track-lifecycle.md)); the analysis columns went to `tracks`, where they belong. The three sweeps did not move with them.
-
-Every one of them read its worklist off `listTracks` — the **feed** engine — through `FINDINGS_FROM`, an **inner join** onto the certification. Post-split that join is a silent filter. A catalogue track was structurally invisible to capture, to analysis, and to embedding: it could never get a vector, and The Ear ranks the catalogue **by** its vector, so the feature it was built for had nothing to rank. The write-back was blind the same way — `updateTrack` resolved through the same join, so a `bpm` or `embedding` PATCH on a catalogue track **404'd**.
-
-Two more things fell out of the audit:
-
-- **`capture_priority` was written and read by nothing.** The Ear's sweep computed the pre-audio ladder onto every catalogue row, and no queue consumed it. The capture queue drained newest-first — insertion order — while the signal that says _whose audio is worth buying_ sat unused on the row.
-- **The veto could not be enforced.** `skipped-label` (the operator ruled this label out) and `none` (nothing ties this to the archive) both stored tier **0**, so SQL could not tell them apart. A veto that only sorts last is not a veto: the queue drains, and last arrives.
-
 ## The work queues
 
 `listTrackWork` (`apps/web/src/lib/server/track-work.ts`) serves all three stages off `tracks`, outer-joined to the certification. One op, one CLI command:
@@ -38,15 +27,11 @@ A read is a **page**, capped at 200 rows, so its length answers "how many did I 
 
 Audio capture is metered — a residential proxy bills **per GB** — so the order this queue drains in literally decides what the money buys. It is one `ORDER BY`, evaluated in SQL:
 
-1. **Certified first.** A finding is a track Fluncle already said yes to. Its backlog outranks any speculative catalogue row, always — the catalogue can never starve the archive. (Proven: a catalogue row on the _top_ rung still loses to a finding.)
-2. **Then `capture_priority` DESC** — the Ear's pre-audio ladder (artist > label > seed-label > nothing). Every finding coalesces to 0 here, so the rung only ever orders the catalogue.
-3. **Then newest-first** within the findings, then the track id, so a tick is deterministic.
-
-Never insertion order. Never alphabetical.
+Order capture work by certification first, then `capture_priority DESC`, then newest finding and track ID for determinism.
 
 ### The veto is a predicate, not a sort
 
-A label the operator ruled out is now **tier −1** — its own tier, strictly below `none`'s 0. That is what makes it enforceable: the capture worklist excludes it in SQL (`capture_priority >= 0`), so a vetoed track is **never handed to the thing that spends money**. Every display property [docs/the-ear.md](./the-ear.md) promises survives: the row keeps its place in the capture lens, still sorts last, still carries its honest reason line. Ordered last, kept anyway — and never bought.
+A disabled label has capture priority −1 and is excluded by `capture_priority >= 0`. Its row remains visible for inspection but never reaches the metered capture worker.
 
 It is scoped to **capture alone**, deliberately. A ruling governs what Fluncle _acquires_ ([docs/label-entity.md](./label-entity.md) — a capture **is** an acquisition), not what he may measure. If the bytes are already on file, analysing and embedding them is free, and the resulting vector is how The Ear gets to _disagree_ with the ladder.
 
@@ -65,7 +50,7 @@ The danger is that `update_track` is a single generic endpoint. The analysis fie
 - an **uncertified** track takes every analysis field, and
 - **refuses every certification field** with a `409 uncertified` that names the field.
 
-It refuses **loudly** on purpose. `update findings … where track_id = ?` on a row with no finding matches zero rows — it _succeeds_, silently, reporting the fields as written. That is the worst failure available, which is why the rail is a thrown error and not a hopeful `WHERE` clause. The path also never `INSERT`s a `findings` row: certifying a track is `publish_track`'s job alone.
+Return `409 uncertified` before applying any certification field. A zero-row `UPDATE` could otherwise report success without persisting the field.
 
 The publish and video ops need no new gate — they resolve through `requireTrack` → the finding join, so a catalogue track is a 404 there and they cannot so much as name it. The read join and the write rail enforce the same rule from two directions.
 
@@ -73,7 +58,7 @@ Both halves are proven against the real schema in `findings-certification.integr
 
 ## The GPU batch
 
-The on-box sweep (`fluncle-embed`, rave-02) embeds **one track per 5-minute tick**, and rave-02 is CPU-only: a windowed full-song MuQ forward is minutes-scale there, so the box does roughly a dozen tracks a day. That is fine for the certified archive — Fluncle finds ~15 tracks a _week_ — and hopeless for the catalogue, which arrives in the thousands. At a dozen a day a 10k catalogue is two years, and a catalogue track with no vector is a track The Ear cannot hear at all.
+Use the CPU sweep for the low-volume certified archive and the GPU batch for catalogue-scale backlogs. Measure current throughput before sizing a GPU run.
 
 `embed-batch.ts` is the same job in the other shape: take tracks off the **same** queue, pull their audio, embed them on the GPU, write the vectors back through the **same** agent-tier API.
 
@@ -98,7 +83,7 @@ Four properties make the hour actually fill, and each is proven with a fake cloc
 
 **The page is sized to the time that is left.** Each page is cut to `remaining time ÷ observed per-track time` — measured from the pages this run has already done, never a hardcoded guess. A page of audio pulled out of R2 and then abandoned is money paid for nothing, so a page the budget cannot finish is never started.
 
-**The first page is ONE track — a calibration probe.** A run cannot stop in the middle of a page: whatever a page starts, it finishes. So sizing the first page off a _guess_ is the one mistake here that can cost real money — guess 60s/track on a pod that turns out to do 6 minutes, and a 10-track first page overruns a 20-minute budget by an hour. Instead the run embeds a single track, measures what it actually cost (model load included), and sizes every page after it against that number. The probe cannot overrun by more than one track, and it adapts to the pod it is actually on: a fast GPU opens the pages straight up to the cap; a slow one keeps them small.
+**The first page is one track — a calibration probe.** Make the first page a one-track calibration probe, then size later pages from its measured per-track duration.
 
 **The next page's audio downloads while the current page is on the GPU.** The pod is remote from R2 and the GPU is the expensive thing in the room, so the R2 pull is overlapped with the inference (`DOWNLOAD_CONCURRENCY` is the parallelism _within_ a page; this is the one _across_ pages, and it is where the throughput is). This is why the page cap is 100 and not the server's 200: the page currently on the GPU has not had its vectors written back yet, so the server still lists those tracks at the head of the queue — the prefetch has to read _past_ them, and a 200-row read cannot see past a 200-row page.
 
@@ -111,13 +96,13 @@ Four properties make the hour actually fill, and each is proven with a fake cloc
 | `MUQ_DEVICE`       | `auto` → cpu | `cuda`                |
 | `MUQ_WINDOW_BATCH` | `1`          | `8`–`16` (VRAM-bound) |
 
-That is the load-bearing decision here. The decode → window → mean-pool → L2-normalize pipeline **is** the embedding contract; a second implementation of it "for the GPU" is exactly how you end up with two vectors of the same track that no longer sit in the same space. Same script, same windows, same pooling — only the device and the number of kernel launches differ. The windows of a song are independent (each is mean-pooled over its own time axis _before_ the cross-window mean), so stacking them into one `[B, samples]` forward changes nothing about the arithmetic. A short final window is zero-padded to stack, and its mean is taken over its own true frame count, so the padding is never averaged in and a batched run agrees with a sequential one.
+Use the same inference script on CPU and GPU so decode, windowing, pooling, normalization, and vector space remain identical. The windows of a song are independent (each is mean-pooled over its own time axis _before_ the cross-window mean), so stacking them into one `[B, samples]` forward changes nothing about the arithmetic. A short final window is zero-padded to stack, and its mean is taken over its own true frame count, so the padding is never averaged in and a batched run agrees with a sequential one.
 
 **The boundary.** This is the _consumer_ side: given audio already in private R2, embed it. How the bytes got there is a separate concern with its own metered budget and is not this script's business.
 
 ### The runbook
 
-The pod costs money by the minute, but it is **not** an operator-only act: a `RUNPOD_API_KEY` sits in the vault beside the other secrets, so an agent provisions, runs, monitors and **destroys** the pod over the RunPod API, with no dashboard in the loop. (This doc said the opposite until 2026-07-26 — the claim predated the key.)
+An agent provisions, monitors, and destroys the RunPod pod through the API using the vault-provisioned `RUNPOD_API_KEY`.
 
 **The procedure lives in the [`fluncle-embed-batch`](../packages/skills/fluncle-embed-batch) skill, Path B**, and that is the one to follow: it carries the API split (pods are REST, but GPU prices, real uptime and the SSH port are GraphQL-only, and there is no logs endpoint at all), the `dockerStartCmd` trap that leaves you with a billing pod you cannot see into, where the injected secrets actually land, and the detached monitor that holds the destroy so billing stops even if the session dies. What follows here is the shape of the job; the skill is the procedure.
 
@@ -159,7 +144,7 @@ MUQ_DEVICE=cuda MUQ_WINDOW_BATCH=8 bun docs/agents/hermes/scripts/embed-batch.ts
 #  "stopReason":"budget_spent","tracksPerMinute":11.25,"writeFailed":0}
 ```
 
-Read the last three fields and nothing else:
+Use `stopReason`, `remaining`, and `tracksPerMinute` to decide whether the run is complete and size any continuation.
 
 - **`stopReason`** — `queue_dry` is the only one that means _done_. `budget_spent` means there is more work and the clock ran out. `queue_blocked` means every remaining row is one this run already tried and could not finish (a dead R2 object, a failing write-back) — look at those tracks rather than renting again. `embed_failed` means the python side died (usually VRAM: lower `MUQ_WINDOW_BATCH`).
 - **`remaining`** — the honest backlog, counted server-side after the write-backs.

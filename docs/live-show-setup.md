@@ -1,6 +1,6 @@
 # Live show setup — the two-machine rig, the glass, and `run show` (macOS)
 
-Your pre-flight before you go live behind the decks with visuals: how to wire the two-machine rig, put Fluncle's journey on the show display through the glass, stream to Twitch, and come out with the same clean masters the mixtape pipeline expects. This is the live sibling of [mixtape-recording-setup.md](./mixtape-recording-setup.md) — that doc owns the OBS 3-track model, the encoder, the 48 kHz chain, and the "PC MASTER OUT good, Aggregate Device bad" rule; this doc owns everything the live visuals add on top and does not restate what lives there. The architecture and the reasoning behind every choice were the live+longform RFC (shipped #287–#291; now in git history — Unit T is this rig). Once you have the recording, [`fluncle-mixtapes`](../packages/skills/fluncle-mixtapes) takes it from there.
+Your pre-flight before you go live behind the decks with visuals: how to wire the two-machine rig, put Fluncle's journey on the show display through the glass, stream to Twitch, and come out with the same clean masters the mixtape pipeline expects. This is the live sibling of [mixtape-recording-setup.md](./mixtape-recording-setup.md) — that doc owns the OBS 3-track model, the encoder, the 48 kHz chain, and the "PC MASTER OUT good, Aggregate Device bad" rule; this doc owns everything the live visuals add on top and does not restate what lives there. This document is the canonical architecture and procedure for the live rig. Once you have the recording, [`fluncle-mixtapes`](../packages/skills/fluncle-mixtapes) takes it from there.
 
 ## The one rule that matters
 
@@ -51,7 +51,7 @@ The M-Track **is** the splitter — no Y-cables. It line-captures the FLX4 maste
 - **M-Track MAIN OUTS (RCA) → the BX5 monitor speakers**, via the second RCA→TS pair.
 - **M-Track USB-B → the M5.** In macOS the device shows up as a 48 kHz stereo input. It caps at exactly 48 kHz, which is the chain rate — nothing to set, nothing to drift.
 - To buy if missing: one RCA→(TS or XLR, to match the speakers' inputs) pair and a USB-B cable (~€10–15). The existing FLX4→M-Track RCA→TS pair covers the input side.
-- **A/B verified (2026-07-05):** FLX4 MASTER OUT straight to the monitors vs. the M-Track inline — no audible difference. The inline M-Track is the standing topology: it earns its place as the splitter and the 48 kHz USB capture at no cost to what the room hears.
+- The standing topology keeps the M-Track inline as the analog splitter and 48 kHz USB capture while preserving the monitor signal.
 
 ### 2. OBS on the M5
 

@@ -16,14 +16,14 @@ A route file is auto-split, but only its `component` moves to a lazy chunk. Its 
 
 The second shape is the one TanStack Start's own import-protection guide names: an **exported helper referenced outside a `createServerFn().handler()` boundary**. The client build removes a handler body wholesale, and the imports with it — but a resolver that is also exported for a test to drive keeps them alive.
 
-Both were live. Measured on the built bundle in July 2026, four route files (`album.$slug`, `artist.$slug`, `label.$slug`, `galaxies.$slug`) and one shared lib put **~232 KB of rendered server-only modules** into the chunk the homepage downloads first.
+The eager-chunk gate covers route-critical imports and shared helpers that can pull server-only modules into the homepage entry.
 
 ### The two fixes
 
 1. **A value the `head`/`loader`/`validateSearch` genuinely needs** → put it in a client-safe module and re-export it from the server one. Exemplars: [`lib/catalogue.ts`](../apps/web/src/lib/catalogue.ts) (the sort vocabulary, the page bounds, the group shapes, `pageNumbers`) re-exported by `lib/server/catalogue-groups.ts`; [`lib/galaxies.ts`](../apps/web/src/lib/galaxies.ts) (one thin-content floor) re-exported by `lib/server/galaxies-map.ts`. The SQL and the reads never move.
 2. **The data resolution itself** → a `routes/-<entity>-page-data.ts` sibling, reached by a **dynamic import inside the handler body**. Exemplars: `-album-page-data.ts`, `-artist-page-data.ts`, `-label-page-data.ts`. The resolver stays exported and side-effect-free, so its unit test drives it directly against a real database exactly as before.
 
-The same trap catches a `loader` that awaits anything heavy. `/docs/$` and `/docs/` statically imported `-docs-loader.tsx` for their MDX warm-up, which put **99 KB of rendered `fumadocs-ui`** into the eager chunk — on the homepage. Both now `await import("./-docs-loader")` inside the loader, which is free: the loader was awaiting that work regardless.
+A loader that awaits a heavy route-specific module must dynamically import it inside the loader. The `/docs` routes are the exemplar.
 
 ### The one exemption, and why it is safe
 
@@ -33,23 +33,19 @@ The gate does not take that on trust: it **re-checks the premise every build** a
 
 ### What the gate deliberately does not cover
 
-Server modules still reach some **lazy route chunks** — `db/schema.ts` rides `/artists`' chunk, `lib/server/tools/specs.ts` rides another. That is the same bug an order of magnitude cheaper: a page pays only for its own route, not for everyone else's. Widening the gate to every chunk is the next step, not this one; a gate nobody can get green teaches nothing.
+The gate covers the eager entry chunk. Lazy route chunks remain outside its scope.
 
 ## Rule 2 — one render-blocking stylesheet, and it is `styles.css`
 
 Not enforced by a gate (it needs a judgement call the gate cannot make), but the rule is simple: **a CSS file enters the app through `__root.tsx`'s `styles.css?url` link, or it is scoped to the route that needs it.**
 
-A bare `import "some-package/style.css"` in a route module does NOT stay with that route. Rolldown folds it into the client entry's CSS bundle, and TanStack Start attaches the entry's CSS to the `__root` route — so it renders as a **render-blocking `<link>` on every page**. `/docs/api`'s `import "@scalar/api-reference-react/style.css"` is how the app came to ship a second **249 KB (37.6 KB gzip)** stylesheet on the homepage.
+Import route-specific stylesheets with `?url` and link them from the route's `head`. A bare CSS import in a route enters the global entry stylesheet.
 
-The fix is the pattern `/docs` already used for `docs.css`: import the sheet with **`?url`** and link it from that route's `head`. Cascade order is preserved — `@tanstack/react-router`'s `headContentUtils` renders route `head` links (root first, then children) BEFORE manifest CSS, so a route-linked sheet lands exactly where the manifest-attached one did.
-
-### Known, measured, and deliberately not taken
-
-`styles.css` folds in `fumadocs-ui/css/neutral.css` + `preset.css`, which are **docs-only weight on every page: 48 KB raw / 7.8 KB gzip** (measured by building with the two `@import`s removed — 316 KB → 268 KB raw, 47.1 KB → 39.3 KB gzip). Moving them into `docs.css` is not a straight lift: the `--color-fd-*` token bridge in `styles.css` only overrides Fumadocs' default LIGHT `:root` palette because it FOLLOWS `neutral.css` in source order. A docs-only sheet loads AFTER `styles.css`, so `neutral.css` would win and the docs hub would paint light. The bridge has to travel with it, and the result needs verifying against a rendered `/docs`.
+`styles.css` currently includes Fumadocs' `neutral.css` and `preset.css`. Moving them into `docs.css` also requires moving the `--color-fd-*` bridge after those imports so the docs retain the dark palette. Verify the result on a rendered `/docs` page. Measure eager-entry weight from `chunk.modules[id].renderedLength` when evaluating further cuts.
 
 ## Where the weight actually is
 
-Rendered-module weight of the eager entry chunk, after the July 2026 pass (measure it by adding a `generateBundle` hook that dumps `chunk.modules[id].renderedLength`):
+Rendered-module weight of the eager entry chunk:
 
 | Group                                    | Rendered | Note                                                             |
 | ---------------------------------------- | -------- | ---------------------------------------------------------------- |

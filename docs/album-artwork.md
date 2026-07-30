@@ -10,7 +10,7 @@ How Fluncle serves cover art. The rule is **own a bounded display derivative, ne
 
 ### The REF-05 line
 
-REF-05 (the shipped ruling in `wrangler.jsonc`) moved third-party copyrighted media OFF the world-served bucket as a copyright exposure. A hotlinkable full-res Apple-master archive would reverse that. The 1200²-capped, `format=auto` **display derivative** is the operator-ruled middle (decision A): a downscaled copy is still a copy, but it is the non-substitutional display posture, and the operator's label-outreach program is the path that converts it to blessed. Labels stay Discogs/Wikidata-only (Apple has no label entity).
+REF-05 keeps third-party full-resolution copyrighted media out of the world-served bucket. Store only the ≤1200² display derivative; fetch full-resolution Apple artwork ephemerally for video rendering.
 
 ## The source ladder (best source wins)
 

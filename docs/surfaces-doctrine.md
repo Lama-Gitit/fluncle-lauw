@@ -2,8 +2,6 @@
 
 The canonical map of every place Fluncle is reachable across the Galaxy — web routes, subdomains, the public API, the feeds, the agent-discovery maps, the delegated DNS zone, the SSH terminal, the MCP server, the CLI, and the on-box Hermes crons — and the checklist for wiring a new one in.
 
-This doc replaces the old `docs/public-surfaces-checklist.md` (a hand-maintained tickbox list that drifted from the code). The decisions it recorded (per-coordinate web subdomains dropped, the `dig` surface that superseded them, the Tor mirror, the data-graph anchors) live on either in the registry itself or in `docs/planning/ROADMAP.md`'s long-tail section.
-
 ## 1. The registry is the source of truth
 
 Every surface is **one entry in `@fluncle/registry`** (`packages/registry/src/index.ts`) — a pure, typed catalog (`SURFACES`) plus a few selectors over it (`liveSurfaces`, `surfacesForContext`, `surfacesByWeight`, `surfacesByKind`, `statusProbes`, `cronSurfaces`). It is data, not a route table and not a secrets inventory: internal IPs, op-paths, and credentials never go in it.
@@ -21,7 +19,7 @@ Each entry carries: a stable `name` (unique, e.g. `web.log`, `api.tracks`), a `k
 
 ## 2. The surface inventory, by kind
 
-Hand-maintained against the `SURFACES` catalog — nothing generates these tables — but **enforced**: `packages/registry/src/doctrine-parity.test.ts` reads this file and build-fails if any non-`pending` surface's `name` is missing from it. The table drifted eleven surfaces behind before that net existed; the test is why it cannot drift again. Each row is the registry `name`, its address, and what it exposes; the **Weight** column is the surface's prominence in its **home context** — the display context where it most naturally lives (web routes / subdomains / API / feeds / discovery / MCP / DNS rank in `web`; the SSH surface in `ssh`; CLI verbs in `cli`; crons in `status`). The full per-context matrix is §3. Keep this table in step with the catalog when you add or change an entry.
+Hand-maintained against the `SURFACES` catalog — nothing generates these tables — but **enforced**: `doctrine-parity.test.ts` requires every non-pending registry surface to appear in this inventory. Each row is the registry `name`, its address, and what it exposes; the **Weight** column is the surface's prominence in its **home context** — the display context where it most naturally lives (web routes / subdomains / API / feeds / discovery / MCP / DNS rank in `web`; the SSH surface in `ssh`; CLI verbs in `cli`; crons in `status`). The full per-context matrix is §3. Keep this table in step with the catalog when you add or change an entry.
 
 ### Web routes — pages on `www.fluncle.com`
 
@@ -136,7 +134,7 @@ The `/mcp` endpoint speaks the full protocol, not just tools: **tools** (verbs),
 | ---------- | ---------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------- |
 | `ssh.rave` | `ssh rave.fluncle.com` | the rave terminal TUI (Latest findings, Fresh releases, Artist archive, Sonic galaxies, Mixtape archive, Random banger, Submit a track, Subscribe, Install CLI, System status, About, Quit), plus the deep-register one-shots `ssh rave.fluncle.com latest\|fresh\|random` | primary |
 
-A `weights.ssh` value on any surface is a **claim that this TUI displays it**, and the claim is now enforced: [`packages/registry/src/ssh-menu.test.ts`](../packages/registry/src/ssh-menu.test.ts) parses `menuItems()` (and the About screen's link map) out of `apps/ssh/main.go` and build-fails an ssh-weighted surface with nowhere in the terminal to land. It was written because `web.logbook` claimed `ssh: "tertiary"` for a year with no Logbook screen behind it — that weight is dropped rather than faked; building the screen is the larger fix and an overhaul candidate.
+`ssh-menu.test.ts` requires every SSH-weighted surface to resolve to a terminal menu item, deep link, or About-screen link.
 
 ### CLI — the `fluncle` thin client
 
@@ -389,7 +387,7 @@ A surface is operator/agent-only where its only display weight is `hidden` (`cli
 
 Three surfaces sit `pending` today, each naming its own flip in an inline comment: **`web.mix`** (the mixability engine's door, dark until the archive's own depth measurement opens it to the world), and **`web.chat`** and **`web.recommendations`** (the two crew doors — both live and 200 for anyone, but gated to the verified crew while their rollouts run as learning cohorts, so advertising them would point most readers at a door they cannot open yet). Adding the §2/§3 rows is part of each flip, never before it.
 
-Use it to land a surface **ahead of an external gate** so the post-approval fan-out is a single, reviewed, no-other-edits flip. **Fluncle Lens** (`extension.lens`, the `apps/extension` Chrome extension) was the first such entry: it sat `pending: true` through Chrome Web Store review, then went **live on 2026-06-29** by exactly this flip — drop `pending`, swap the placeholder `url` for the store's assigned listing URL (`chromewebstore.google.com/detail/efkkceaofendabikblfjhoepgejfpakk`), and add its §2/§3 rows — and the menus, the dev-row, and the MCP + CLI status labels lit up at once. **Fluncle for iOS** (`app.ios`, `apps/mobile`) proved it again one kind over: pre-staged through two App Store review rounds, approved 2026-07-29, flipped live by the same three moves (`apps.apple.com/app/id6790080540`). (A vendor store listing is not one of our own health-probeable endpoints, so it carries no `probeConfig`.)
+Use `pending: true` for a surface awaiting external approval. On approval, remove `pending`, set the final address, and add the §2 and §3 inventory rows in the same change.
 
 ## 4. Adding a surface — the checklist
 

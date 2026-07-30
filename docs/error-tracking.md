@@ -4,13 +4,11 @@ Fluncle's web app (`apps/web`) reports unexpected errors to **Sentry** for priva
 
 ## The posture: errors + sampled DB-query tracing
 
-Sentry captures **errors and stacks**, and — since the operator-approved raise onto the paid **Team plan** (5M spans/mo) — **sampled performance tracing focused on database queries**. Still no session replay, no profiling, and `sendDefaultPii: false`. Raise this bar further only by an explicit decision, not by accident.
+Sentry runs on the Team plan with a 5M-spans/month budget. Capture errors and sampled DB-query tracing; keep session replay and profiling disabled, with `sendDefaultPii: false`.
 
 ### What tracing captures
 
-The Worker's `Sentry.withSentry` (`apps/web/src/server.ts`) opens a request transaction; under it, the `getDb()` chokepoint in `apps/web/src/lib/server/db.ts` wraps the created libSQL client in a **Proxy** that runs every `.execute()` and `.batch()` inside a Sentry span — `op: db.query`, `name`/`db.statement` = the SQL string (libSQL already parameterizes to `?`, so the name is the normalized/grouped query, truncated to ~200 chars; `batch` is named `db.batch (<count>)`). One chokepoint means every caller — the raw client and Drizzle alike — is covered without touching call sites. Those spans feed the **Queries insight** and the auto **"Slow DB Queries"** detector (op `db*`, SELECT, ≥500ms). The load-bearing target is the **recommendation vector scan**, which the Frontier bench showed hitting a multi-second wall as the catalogue grows — this measures it in prod rather than guessing.
-
-The same chokepoint carries a **transient-gateway retry**, because Turso is reached over HTTP and its gateway occasionally answers a bare 5xx that has nothing to do with the query — one such 502 took a crawler's `/artist/<slug>` render to the root error boundary, and the libSQL HTTP transport has no retry of its own. The safety contract is asymmetric on purpose: **reads retry, writes never do.** A 5xx on a write is ambiguous — it may already have applied — so only `execute` retries, and only for a statement classified as a read (`select …`, or `with …` carrying no write verb, since SQLite allows `WITH … INSERT/UPDATE/DELETE`); anything else, `batch` (one unit, may contain writes), and `transaction` run exactly once as before. When the classifier is unsure it declines, because a false negative is just today's behaviour while a false positive can double-apply a write. Retryable statuses are **502 / 503 / 504** only: 4xx is our own fault and would fail identically, and **524 is excluded deliberately** — the gateway already timed out on that query, so re-running it doubles the load for a near-certain second failure. Up to 2 retries (3 attempts) with a short jittered backoff, run **inside** the existing span so one logical query stays one span, with `db.retry.attempts` recorded when a retry actually happened.
+Database spans cover the recommendation vector scan and other scaling-sensitive queries. The libSQL wrapper retries transient HTTP gateway failures for read-only statements. Treat 4xx responses as non-retryable.
 
 The span import (`startSpan`) comes from **`@sentry/core`** (env-agnostic), NOT `@sentry/cloudflare` (Worker-oriented), because `db.ts` is also imported by bun scripts that run in Node and by tests. When no Sentry client is active — every one of those Node importers, and any dev/test run — `startSpan` is a safe passthrough that just runs the callback and returns its value, so the wrap is invisible and results are unchanged there.
 
@@ -36,7 +34,7 @@ The Team plan's 5M spans/mo is the budget the sampler is tuned against. The **p9
 
 **The Worker** — `apps/web/src/server.ts` wraps the entire custom server entry with `Sentry.withSentry` (`@sentry/cloudflare`, the Cloudflare-native path). The wrap sits over the whole `fetch`, so an unhandled throw from **either** path — `handleOrpc` (mounted first) or the TanStack router beneath it — is captured with a stack.
 
-**Unexpected API faults** — `apiFault` in `apps/web/src/lib/server/orpc/_shared.ts` already logs an unexpected (non-`ApiError`) 500 to the server log; it now also `captureException`s it, tagged `source: orpc.apiFault`, so those 500s land in Sentry as one filterable group. The existing log line and the generic wire body are unchanged.
+`apiFault` logs unexpected non-`ApiError` 500s and calls `captureException` with `source: orpc.apiFault`, while returning the generic wire response.
 
 Both SDKs initialize **only in a production build** (`import.meta.env.PROD`, statically `false` under `vite dev` / `bun run dev` / the smoke routine, `true` in the deployed Worker bundle). A dev session sends nothing, and when the DSN is absent the SDK is inert.
 
@@ -54,7 +52,7 @@ Three headers carry it, all on HTML documents only:
 
 **Where the sink is withheld.** Only a public `https://` origin gets it. Local dev (`http://localhost:3000`) and the `.onion` mirror get the identical policy **directives** with no `report-uri`, no `report-to`, and no `Reporting-Endpoints` — a dev session or a headless browser smoke must not write into the production Security feed in exactly the window it is being watched, and a Tor visitor's browser must never be handed an instruction to POST to sentry.io.
 
-**Expected volume, and why the operator watches before flipping.** Every visitor's browser reports, and a report-only policy reports on things that are not attacks: a browser extension injecting a script or stylesheet into the page is the single largest source, and `script-src`'s `'unsafe-inline'` does not cover an extension's `src=`. Expect the feed to be extension noise plus a long tail of ISP/proxy injection. Sentry groups by directive + blocked URI, so the noise collapses into a handful of issues rather than a flood, and its inbound filters can drop the browser-extension class outright if it gets loud. **Graduating the report-only policy to enforcing is an operator decision made from this feed** — watch it across a real traffic window, confirm no legitimate first-party subresource appears, then flip. No evidence, no flip.
+Promote the report-only policy to enforcement after a representative traffic window shows no legitimate first-party violations.
 
 ## What is pending
 

@@ -2,7 +2,7 @@
 
 The set video is a mixtape's fiction made visible: **Fluncle dreaming, the set travelling through the findings' own worlds.** Where a per-track clip is one finding under the eclipse, the hour render is the whole mixtape as one continuous piece — each chapter is a finding's archived composition re-driven at chapter length, the transitions are travel between worlds, and a single set-level trajectory (the dreamer's continuity) breathes across the whole thing so it reads as a piece, not a playlist. The Log ID names each finding as it arrives (that moment doubles as a YouTube chapter) and the piece ends on the mixtape's `F`-marked coordinate.
 
-This is the offline sibling of Fluncle Live (the live+longform RFC, Unit O; shipped #287–#291, now in git history). The live glass and this hour render share the spine but ship independently. The machinery lives in [`packages/video/src/set-video/`](../packages/video/src/set-video); the creative kit it renders against is unchanged (`packages/video/src/remotion/cosmos.ts`, the fluncle-video skill).
+This is the offline sibling of Fluncle Live. The live glass and hour render share the same creative spine but ship independently. The machinery lives in [`packages/video/src/set-video/`](../packages/video/src/set-video); the creative kit it renders against is unchanged (`packages/video/src/remotion/cosmos.ts`, the fluncle-video skill).
 
 ## The one command
 
@@ -56,7 +56,7 @@ Full renders use the RFC §6 encode (h264, `crf 20` under a `~22 Mbit` VBV cap, 
 
 ## The data source
 
-A mixtape's stored cues currently carry `null start_ms`, so the ground-truth mix-in offsets come from **fingerprint alignment** of the planned previews against the set audio (the de-risk spike, 2026-07-03: cosine 0.87–0.985, correct ordering). For `019.F.1A` those verified offsets are committed as fixtures under `src/set-video/__fixtures__/019.F.1A.{anchors,tracklist}.json` (provenance: the plan-pointer fingerprint walkthrough). Once the recording cue rail persists real `start_ms`, `render-set` reads them live; until then it reads the fixtures. Chapters always have a Log ID + a rendered archived video (mixtapes never carry out-of-canon songs), so no default/holding scenes appear in the hour render.
+When stored cues have no `start_ms`, `render-set` uses committed fingerprint-alignment fixtures. The reference alignments score 0.87–0.985 cosine and preserve track order. Persisted cue offsets take precedence when available. Chapters always have a Log ID + a rendered archived video (mixtapes never carry out-of-canon songs), so no default/holding scenes appear in the hour render.
 
 ## The overlay policy
 

@@ -1,18 +1,18 @@
 # The label entity
 
-Fluncle keeps a canonical **label entity** (`labels`, keyed on the slug), and hangs one operator control off it: **which labels the future catalogue crawler may seed from.** Both halves now exist: the public `/label/<slug>` + `/labels` pages, and the operator's control surface.
+Fluncle keeps a canonical label entity and one operator control: which labels the catalogue crawler may seed from. Its public and operator surfaces are `/label/<slug>`, `/labels`, and `/admin/labels`.
 
 The label is the third node of the graph the archive is becoming — **log ↔ artist ↔ label ↔ album**. Its structural twin, the album, is documented in [docs/album-entity.md](./album-entity.md), which also carries what the two share: the graph pointer on `tracks`, the mint-only-off-a-finding rule, the public page's shape, the unnamed quieter rows, and the thin-content gate. Read that doc for the page; this one owns the crawl-seed ruling.
 
 ## The data model
 
-`tracks.label` stays exactly what it has always been: **the raw string Deezer handed back on the add**, free text, never rewritten. It is the audit trail and the re-normalization input. The `labels` table is its normalized twin, related by slug:
+`tracks.label` is the immutable raw vendor string. The `labels` table is its normalized twin, related by slug:
 
 ```
 slugify(tracks.label) = labels.slug
 ```
 
-That fold is what makes `Pilot.` and `Pilot` one label without a destructive rewrite of the findings. `tracks` also carries an indexed **`label_id` pointer** at the row — added with the public pages, which read by it (a seek, never a fold over the catalogue). It is an addition, not a replacement: `tracks.label` stays the raw captured string forever. See [docs/album-entity.md](./album-entity.md#the-graph-pointer-tracksalbum_id--trackslabel_id).
+`tracks.label_id` is the indexed graph pointer used by public reads. See [docs/album-entity.md](./album-entity.md#the-graph-pointer-tracksalbum_id--trackslabel_id).
 
 **The slug is the display identity and the fallback fold; the MusicBrainz label MBID (`mb_label_id`) is the stable fold key for a DISCOVERED label** — the label twin of the release-group MBID the album entity folds on. `slugify` cannot fold `Med School` and `Medschool` (they slug apart), so a crawler that minted a discovered label by slug alone would mint those two spellings as separate labels. Folding on the MBID collapses them: a UNIQUE index on `mb_label_id` (NULLs distinct — most rows carry none) makes `where mb_label_id = ?` a connect-or-create the crawler resolves BEFORE the slug path. When a caller carries an MBID and the resolved/minted row has none yet, it is **adopted fill-empty-only** (`where mb_label_id is null`), so a publish-minted label and the crawler's later discovery collapse into one row instead of duplicating, and a row already folded on a different MBID is never rewritten. The alias layer (below) stays the secondary defense for a NON-MusicBrainz source (Apple's `recordLabel`) and for the fold `slugify` can't do on its own.
 
@@ -24,7 +24,7 @@ That fold is what makes `Pilot.` and `Pilot` one label without a destructive rew
 | `seed_state`  | `enabled` \| `disabled` \| `undecided`. **Crawl scope, never storage** (below).                                              |
 | `ruled_at`    | When a HUMAN last ruled. NULL = no operator has ruled it (a machine default, or the one-time bootstrap).                     |
 
-A label's finding count is **derived** (`GROUP BY tracks.label`, folded by slug), never stored — the denormalization-drift class is deleted outright, as with galaxy member counts.
+Derive a label's finding count with a grouped read; do not store it.
 
 ## Crawl scope, never storage
 
@@ -34,7 +34,7 @@ This is the ruling, and it is the whole point of the control. **`seed_state` ans
 - **`enabled`** means the next crawl may dig from it.
 - **`undecided`** is where a brand-new label enters: **never silently crawled, never silently dropped.** It surfaces in the `/admin` attention queue until a human rules on it.
 
-"What we crawl FROM" and "what we KEEP" are separate concepts, and they stay that way in the code: no read anywhere joins `seed_state` to a decision about what is shown, kept, or deleted, and none ever should. `apps/web/src/lib/server/labels.test.ts` pins this with a test that disables a label and asserts the `tracks` table comes out byte-identical. This reach has been tested and ruled on: a 2026-07-26 audit proposed gating INDEXABILITY (noindex + sitemap membership) on the label's ruling, and the operator ruled it down on 2026-07-27 — offering a page to a search engine is presentation, not acquisition, so `seed_state` does not touch it either; off-genre residue is handled by the destructive prune pass and the crawler's own boundary gate, never by this column.
+`seed_state` affects crawl acquisition only. It does not affect storage, rendering, indexability, or sitemap membership.
 
 ## How a label gets a row
 
@@ -46,23 +46,15 @@ Automatically, three ways, all idempotent:
 
 An existing label is never clobbered: its seed state, its ruling stamp, its display name, and any MBID already on it all survive.
 
-**Catching history up (one-off, operator-run).** Existing labels carry `mb_label_id = NULL` until `scripts/backfill-label-mbid.ts` — a standalone, one-off, prod-Turso script, **not** in `db:backfill` — resolves each by name through the shared 1 req/s MusicBrainz client and stamps it fill-empty-only. It **never merges**: if two existing rows resolve to one MBID (a duplicate that slugified apart), it LOGS the collision and leaves the second NULL, because merging would repoint a public `/label/<slug>` URL — the operator's call, not a script's.
+### MBID backfill
 
-## The starting ruling (the one-time bootstrap)
-
-`scripts/backfill-labels.ts` also carries the operator's **starting ruling** (the-archive RFC, D7), applied **exactly once**, gated on a `labels_seeded_at` marker in the `settings` table:
-
-- **Skipped** (crossover-remix imprints, not drum & bass): Anjunabeats, Armada Music, Axtone Records, Positiva, Tomorrowland Music / Experts Only, Atlantic Records UK, Counter Records, Zerothree.
-- **Undecided** (the operator's call, pending): Chelou, spiration music, UKF (a channel brand rather than a label proper — seeding from it would cast a very wide net).
-- **Enabled**: everything else in the archive at the moment the entity landed.
-
-It is a **one-time data step, not runtime logic** — nothing in the Worker reads those lists, and once the marker is stamped the step never runs again. A label added tomorrow enters `undecided` and waits for a human, like any other. It also refuses to touch a row an operator has already ruled on (`ruled_at IS NOT NULL`), so a re-run cannot overrule a human.
+`scripts/backfill-label-mbid.ts` resolves labels lacking `mb_label_id` through the shared MusicBrainz client and stamps the result fill-empty-only. It logs collisions and never merges rows.
 
 ## The surfaces
 
 **`/admin/labels`** is the management station (sidebar: Labels, beside Artists). Sections in the order the work arrives: _Waiting on a ruling_ (the queue), then _Seeding from_, then _Not seeding_. An unruled row's two ruling buttons are the loudest thing on the page (the disclosure law); re-ruling a settled label is the rare act, behind the row's `⋮`.
 
-**A ruling is an identity question, so the row answers it.** "May we seed from Helix?" is unanswerable when three labels share the name, and the row used to carry only a name, a logo, a slug and two buttons. It now carries what MusicBrainz knows about which label it is, as one quiet line under the name: the **disambiguation** comment (`labels.disambiguation` — the field MusicBrainz writes for exactly this problem), the founding pair (`Founded 1996 · London`), and the **MBID as an outbound link** so the whole entity is one click away mid-ruling. All four ride `LABEL_COLUMNS`, so they cost the read nothing; all four are additive-optional on `LabelAdminItem`, so the CLI is unchanged. Most labels carry none of it and simply render no line — never a placeholder.
+Each ruling row displays the label name plus any MusicBrainz disambiguation, founding date and location, and an outbound MBID link.
 
 **The attention queue** carries `label-review` as a source (`apps/web/src/lib/attention.ts`): every `undecided` label is one row, oldest-first, deep-linking to `/admin/labels`. It never rides the deadline tier — a ruling steers the next crawl and blocks nothing.
 
@@ -73,7 +65,7 @@ It is a **one-time data step, not runtime logic** — nothing in the Worker read
 | `list_labels_admin` | admin (agent-allowed read) | `GET /admin/labels`        |
 | `update_label`      | operator                   | `PATCH /admin/labels/{id}` |
 
-`list_labels_admin` takes an optional `seedState` filter, and **`?seedState=enabled` is the seed-set read**: when the catalogue crawler exists, that is where it asks — with its agent token — what it may seed from. Nothing consumes it yet. The `_admin` suffix (the `list_galaxies_admin` precedent) keeps the public `list_labels` / `get_label` names free for the coming `/label/<slug>` pages.
+`?seedState=enabled` is the crawler's agent-authenticated seed-set read. The `_admin` suffix distinguishes it from the public `list_labels` and `get_label` operations.
 
 `update_label` is operator tier: ruling steers what Fluncle crawls next, which is an editorial act, so an agent token 403s at `operatorGuard` (the `update_galaxy` precedent). Both are enforced by the build-fail coverage tests (`orpc-auth-coverage`, `orpc-naming`).
 
@@ -81,13 +73,13 @@ The server layer lives in `apps/web/src/lib/server/labels.ts`.
 
 ## The public page
 
-`/label/<slug>` (and the `/labels` index) shipped with the album entity, and its shape is documented once, in [docs/album-entity.md](./album-entity.md#the-public-surfaces): findings first, the artists as chips, the unnamed quieter rows beneath them, an `Organization` JSON-LD node whose `@id` is the page URL, and the renderable-track thin-content gate.
+A label entity always has a public page.
 
 Two things worth restating here, because both are about this entity specifically.
 
 **The public page is blind to `seed_state`.** A label the operator skipped for the crawler renders exactly as it always did, and its findings keep counting. Crawl scope, never storage — no read behind the page knows the column exists.
 
-**A label with no finding still has a public page.** A label the crawler discovered and Fluncle has certified nothing on gets a `/label/<slug>` page built from its crawled releases, and that is deliberate: a discography is a real page. It briefly 404'd instead, on the rule _"the catalogue deepens a page, it never creates one"_ — that rule is **reversed**, and the reasoning is in [album-entity.md](./album-entity.md#an-entity-earns-a-page-on-its-content-not-on-fluncles). The short version: the doorway page was never the page's _existence_, it was the **hollow rendering** (a _"Nothing logged off this one yet."_ heading above a wall of outlinks), so the fix is **conditional sections** — no findings, no findings section, no apology — plus a thin-content gate on **total** content that keeps a two-row stub out of the index.
+Findings-free pages render their crawled discography, omit empty sections, and enter the index only when total renderable content clears the thin-content gate.
 
 One consequence worth naming, because the two reads differ in SHAPE: **`/labels` and the sitemap are separate reads over the same floor-clearing set.** `/labels` is ONE unified A–Z index of every label Fluncle holds (`listLabelsHubPage`) — certified findings and the wider catalogue in one alphabetical `?page=N` surface, a certified label's name lit in Eclipse Gold, the rest unlit — for a human to browse; the sitemap (`listLabelSitemapRows`) is the machine's complete map, so it wants the WHOLE set at once (no paging) and only the slug + lastmod a `<url>` needs. Same floor, different shape, so a crawler-discovered page is linked AND sitemapped, never orphaned. The unified-index shape is documented once, in [docs/album-entity.md](./album-entity.md#the-sitemap-carries-every-page-the-hub-is-one-unified-index).
 
@@ -95,7 +87,7 @@ The crawl also bounds the `label-review` queue: `listLabelReviewRows` hands the 
 
 ## The label's own image (its real logo, not a borrowed cover)
 
-Every label surface — the `/labels` index cards, the `/label/<slug>` page (its OG/social image), the search entity row, the graph hover card — used to show **the freshest finding's album cover** as the label's picture. For most labels that is an arbitrary sleeve; only a label whose cover happens to carry its logo (Anjunabeats) read right. The fix gives a label its **OWN image**, and it is stored on the `labels` row:
+Every label carries its own image lifecycle on the `labels` row. Public and admin surfaces prefer the owned logo and fall back to the freshest finding cover when no logo resolves.
 
 | Column                                  | What it is                                                                                                                                                                                       |
 | --------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
@@ -122,7 +114,7 @@ Every label surface — the `/labels` index cards, the `/label/<slug>` page (its
 
 **The surfaces read one ladder, each at its own rung.** Every label read resolves `image_key` + `image_updated_at` → a URL and leads with it over the cover. The reads emit the `large` (640) rung — the album/artist DTO contract — and a surface takes it down where its footprint is smaller:
 
-- `/labels` cards — `listLabelsHubPage` returns `logoImageUrl`; the card renders `logo ?? cover`, **both** at `COVER_TILE_SIZE` (300), so the logo is no longer the one full-size original on a catalogue-scale grid.
+- `/labels` cards — `listLabelsHubPage` returns `logoImageUrl`; the card renders `logo ?? cover`, **both** at `COVER_TILE_SIZE` (300), so the logo renders at tile size like every cover.
 - `/label/<slug>` — `getLabelBySlug` returns `logoImageUrl`; the page's OG/social image is `logo ?? freshest cover ?? site cover` at `large`. The logo is **not** painted on the page (the masthead is the name, the bio, and the founding line), so it is a head-only asset and never a preload candidate.
 - `/admin/labels` — the row plate is 44px, so it asks for `small` (64).
 - Search — the label entity row leads with the logo over the cover subquery (`search.ts` carries `logo_key` + `logo_updated_at`).
@@ -166,9 +158,9 @@ The album entity inherits the same class of collision (two records that share a 
 
 Aliases stop a split going FORWARD; `merge_label` cleans up the PRE-EXISTING ones — two `labels` rows that already mean one label because their spellings slugged apart before an alias caught them (the Med School / Medschool class). The operator runs `fluncle admin labels merge <losingSlug> <canonicalSlug>` (operator tier, `POST /api/admin/labels/{slug}/merge`), folding the LOSING row into the CANONICAL one in a single transaction. `mergeLabel` in `apps/web/src/lib/server/labels.ts` does the work; a merge is proven by the harness in `labels.test.ts`.
 
-**It re-points every FK, misses none.** The loser's referencing rows all move onto the canonical: `tracks.label_id` (every finding and catalogue track), `labels.parent_label_id` (the loser's sublabels adopt the canonical as their parent, #704's lineage edge), and `label_aliases.label_id` (the loser's own aliases). `albums` carries no label FK — its label edge is derived at read time from the raw string, so there is nothing to re-point there. The `crawl_frontier` queue keys by label SLUG, not by id, and is transient resumable state, so it is deliberately outside this id-FK re-point.
+A merge repoints every label foreign key, including `tracks.label_id`, `labels.parent_label_id`, and `label_aliases.label_id`. `albums` carries no label FK — its label edge is derived at read time from the raw string, so there is nothing to re-point there. The `crawl_frontier` queue keys by label SLUG, not by id, and is transient resumable state, so it is deliberately outside this id-FK re-point.
 
-**Identity + facts reconcile CANONICAL-WINS.** For `mb_label_id`, `discogs_label_id`, the logo (`image_key`), `founding_date`, `founded_location`, `parent_label_id`, and `lineage_state`, the canonical's existing value always stands and the loser's fills only an EMPTY canonical slot (coalesce). This is load-bearing: the 2026-07-18 audit found a loser row whose MBID had mis-resolved to a J-Pop division of Universal Japan with bogus founding facts — the merge lets the canonical's correct identity stand and DISCARDS the loser's wrong one, never overwriting.
+Identity and founding facts use canonical-wins semantics: retain an existing canonical value and fill only empty fields from the losing row.
 
 **`seed_state` resolves by `ruled_at` precedence, and stops and asks on a real conflict.** The more recent operator ruling wins. But when BOTH rows carry a non-null `ruled_at` AND their seed states disagree, the op REFUSES with a 409 (`merge_seed_conflict`) telling the operator to re-rule one to match first — it never silently picks a side.
 

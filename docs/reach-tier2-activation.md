@@ -1,9 +1,6 @@
-# /reach Tier-2 activation — Twitch (TikTok + Instagram now ride Postiz)
+# /reach Tier-2 activation — Twitch
 
-The public /reach page ships its Tier-1 platforms live. **2026-07-14 update: TikTok and Instagram no longer need their own OAuth apps** — both accounts are already connected to Postiz for publishing, and Postiz's public analytics endpoint (`GET /analytics/{integration}?date=N`) exposes per-label daily series through the `POSTIZ_API_KEY` the Worker already holds. The live probe of the real account settled what each carries:
-
-- **TikTok — fully covered, better than its own Display API**: `Followers`, `Total Likes`, `Views` (plus Following/Videos/Recent-*, deliberately unmapped). The TikTok user-OAuth leg (routes, token store, envs) is **retired**; no TikTok developer app, no scope review.
-- **Instagram — engagement only**: `Reach` / `Views` / `Likes` / `Saves` / `Comments`, **no follower count** (the standalone-Instagram connection does not expose audience). The reach page carries Instagram `views` via Postiz today; the follower count stays honestly absent. The Instagram-Login OAuth leg (instagram.ts + its auth routes + `INSTAGRAM_CLIENT_ID`/`_SECRET`) **stays built and DORMANT** as the someday-followers path — activate it only if Meta's business verification + app review is ever worth one number.
+TikTok and Instagram reach metrics come from Postiz. TikTok exposes followers, likes, and views. Instagram exposes engagement metrics but not follower count. Direct TikTok OAuth is unnecessary; Instagram OAuth remains inactive unless follower access justifies Meta verification.
 
 **The one remaining activation is Twitch**, below.
 
@@ -14,8 +11,8 @@ Mirrors the existing Spotify/YouTube/Mixcloud token discipline exactly:
 - **Client creds** ride optional env (`TWITCH_CLIENT_ID`/`_SECRET`). Absent → the start route answers a clean "not configured" 400; the collector skips.
 - **The durable token lives Worker-side** (`twitch_auth`, one row), minted server-side and refreshed on demand. The CLI/box never holds it.
 - **The redirect URI is derived from the request origin**, so there is no `*_REDIRECT_URI` var — but the callback URL MUST be registered in the Twitch app console: `<origin>/api/admin/twitch/auth/callback`.
-- **Connect flow:** visit `/api/admin/twitch/auth/start` from a logged-in admin session → it returns `{ authUrl }` → follow it, grant **as the broadcaster account** (the follower total needs the broadcaster's own user token + `moderator:read:followers` — an app token no longer suffices; Twitch change-log 2023-09-06) → the callback stores the token and bounces to `/admin?twitch=connected`.
-- **Finish in the SAME browser you started in.** A connect binds its OAuth state to a short-lived nonce cookie the start leg sets (docs/admin-shell.md § Auth), so pasting the `authUrl` into a different browser or profile makes the callback answer `invalid_state` — by design. There is no longer a portable variant: a Bearer-carried start (the CLI path) returns a Fluncle-origin **handoff link** rather than the provider's URL, and that link mints the state inside whichever logged-in admin browser opens it. Open it signed out and it bounces to `/admin/login`, then returns you to the connect.
+- **Connect flow:** visit `/api/admin/twitch/auth/start` from a logged-in admin session → it returns `{ authUrl }` → follow it and grant as the broadcaster account → the callback stores the token and bounces to `/admin?twitch=connected`. The follower total requires the broadcaster's user token with `moderator:read:followers`; an app token is insufficient.
+- **Finish in the same browser you started in.** Complete the connect flow in the browser that owns the short-lived OAuth nonce cookie. Bearer-started flows return a Fluncle handoff link that establishes state in the logged-in admin browser.
 - **Verify:** `fluncle admin reach collect` — twitch leaves the `skipped` list and appears under `collected` with `followers`.
 
 ## What is deliberately NOT here
