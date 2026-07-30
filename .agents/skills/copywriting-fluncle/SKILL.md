@@ -5,7 +5,7 @@ description: "Write or edit any copy for the Fluncle platform in Fluncle's voice
 
 # Copywriting Fluncle
 
-Use this skill to write copy that sounds like Fluncle: the uncle with the good records, doing this since '90, who also happens to be a traveler through time and space. He logs what he finds out there, and every surface is one of his findings sent back across the Galaxy. He never travels alone; he writes to the crew. Fluncle's voice is Maurice's personal voice bent through a persona, a drum & bass vocabulary, and a cosmos. The canonical definition lives in `references/voice.md` inside this skill; this skill tells you how to load and apply it. This skill is self-contained — everything it needs ships in `references/`.
+Use this skill to write copy that sounds like Fluncle: the uncle with the good records, doing this since '90, who also happens to be a traveler through time and space. He logs what he finds out there, and every surface is one of his findings sent back across the Galaxy. He never travels alone; he writes to the crew. Fluncle’s voice combines the uncle persona, drum & bass vocabulary, and the cosmos. The canonical definition lives in `references/voice.md` inside this skill; this skill tells you how to load and apply it. This skill is self-contained — everything it needs ships in `references/`.
 
 **Scope.** This skill governs what a non-operator reads; the operator tier (the `fluncle admin …` CLI and every `/admin` route) carries a register carve-out in `references/voice.md` §5 — the em-dash clause join and terse ALL-CAPS status words lift there and nowhere else, and the rest of the canon still holds.
 
@@ -23,7 +23,7 @@ Where sources disagree on language, `references/voice.md` wins. The two known di
 ## Workflow
 
 1. Identify the surface: web UI, Telegram, CLI, SSH, README/meta, or social. The surface sets the register via the Depth Gradient in `references/voice.md`: narrative saturation is uniform (fully in-fiction everywhere, the warm web included), and only technical density grades by altitude — web and Telegram stay low and warm; CLI is drier; SSH is the most technical and referential, a recovered terminal from a research vessel, borderline Ready Player One at the prompt.
-2. Read `references/voice.md` in full. It is short by design; do not skim it from memory of a previous session, because the vocabulary and rules evolve there first.
+2. Read the current `references/voice.md` in full before drafting.
 3. Extract the factual payload before writing: what happened (a banger was found, a submission arrived, an error occurred), what the reader should do next, and which facts are real. Never invent tracks, artists, dates, Log IDs, listener counts, or scene credentials.
 4. Draft in the register of the surface, then tighten against the named rules.
 5. Run the final checks below.
@@ -52,11 +52,11 @@ These are reminders, not the spec; the spec is `references/voice.md`.
 
 Before returning copy, verify against `references/voice.md`:
 
-- No banned identity words: "transmission(s)", "signal(s)", "anomaly", "curated / curation", "content", "stream / streaming" as identity, or marketing buzzwords. (📻 is retired with "transmission".) Fluncle finds and logs; he does not transmit, pick up signals, or curate.
+- No banned identity words: "transmission(s)", "signal(s)", "anomaly", "curated / curation", "content", "stream / streaming" as identity, or marketing buzzwords. Use only the sanctioned emoji set defined below. Fluncle finds and logs; he does not transmit, pick up signals, or curate.
 - Canon names are current: "Fluncle's Findings" (not "Fluncle's Finest"), "the Galaxy" (not "the ecosystem"), "the crew" for the community, "Found" for dates (not "Added" / "Discovered").
 - "Banger" appears at most once per paragraph; repeats became track or tune (the Banger Budget).
 - Every pro-form points at a noun written earlier in the same copy (the Name It Rule): scan for "ones", "things", "stuff", bare "more" — if the antecedent is not in the string the reader sees, write the noun.
-- No exclamation marks. No em dashes in prose (the `Artist — Title` separator is the only sanctioned use). Mechanical sweep: grep the draft for `—` (U+2014); every hit must be an `Artist — Title` separator, rewrite the rest into commas, colons, or separate sentences. A slipped em dash has shipped before; this grep is the backstop, not a matter of eyeballing.
+- No exclamation marks. No em dashes in prose (the `Artist — Title` separator is the only sanctioned use). Mechanical sweep: grep the draft for `—` (U+2014); every hit must be an `Artist — Title` separator, rewrite the rest into commas, colons, or separate sentences. Use the grep as the mechanical backstop for this rule.
 - Sentence case for UI copy, headings, buttons, and labels; ALL CAPS only quotes the cover art or a sanctioned brand-mark plate (e.g. "RAVE TERMINAL" under the SSH figlet logo).
 - Emoji only on Telegram, only from the sanctioned set (🛸, 🎧).
 - Cosmos garnish modifies a working earth verb; it never replaces one, and it never appears inside compact controls (the Garnish Rule), with the long-form first-person carve-out.

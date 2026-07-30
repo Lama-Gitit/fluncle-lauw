@@ -59,9 +59,9 @@ Set `SERVER_NAME`, `SERVER_TYPE`, `LOCATION`, `IMAGE`, or `HCLOUD_SSH_KEY_NAME` 
 SERVER_IPV4=<public-ip> packages/skills/hetzner-devbox/scripts/bootstrap-hardening.sh
 ```
 
-This streams the vendored `scripts/bootstrap-private-vps.sh` over SSH, passes `TS_AUTHKEY` without putting the key on the command line, and configures the server as Tailscale-only. Admin access is **plain OpenSSH on `:2222`** reached over the tailnet (tunneled through WireGuard/UDP `41641`), **not** Tailscale SSH on `:22`. Tailscale SSH (`--ssh`) is deliberately NOT used: on a tailnet whose ACL sets the SSH `action` to `"check"`, it forces a per-session browser re-auth that blocks every headless/agent connection — plain sshd avoids it, and key-only auth + tailnet membership remain the two factors (no public exposure either way). After it finishes, verify `ssh -p 2222 admin@<tailscale-hostname>` works before relying on the firewall. **Disable Tailscale key expiry for the node** (admin console → Machines → ⋯ → Disable key expiry), or pass `TS_TAGS=tag:server` so the node joins tag-owned and is exempt from expiry — a private box has no public fallback, so an expired key is a total lockout.
+This streams the vendored `scripts/bootstrap-private-vps.sh` over SSH, passes `TS_AUTHKEY` without putting the key on the command line, and configures the server as Tailscale-only. Admin access uses key-only OpenSSH on port `2222` over Tailscale. This avoids browser re-authentication under ACLs whose SSH action is `check`. Disable key expiry for the node or join it as `tag:server`, because the private profile has no public admin path. After it finishes, verify `ssh -p 2222 admin@<tailscale-hostname>` works before relying on the firewall.
 
-The bootstrap also installs the **1Password CLI (`op`)** from the vendor apt repo. This is a base prerequisite, not tooling: a private box's whole secret layer begins with `op inject`, so with no `op` on PATH that first sync call is `command not found`, no env file is ever written, and every job on the box then runs credential-less with nothing to warn you — which is why it lives here rather than among `install-toolchain.sh`'s optional groups. The vendor repo (not a pinned tarball) means ordinary `apt-get upgrade` keeps it current instead of letting it rot at a version nothing watches. Set `INSTALL_OP=0` for a private box that will never hold a secret template. The **public** SSH app profile deliberately does not get it — see [Rotate the agent token](#rotate-the-agent-token); `op` stays off the edge.
+The bootstrap installs the 1Password CLI because private-box secret synchronization begins with `op inject`. Install it from the vendor apt repository so normal system upgrades keep it current. Set `INSTALL_OP=0` only when the box has no secret template. The **public** SSH app profile deliberately does not get it — see [Rotate the agent token](#rotate-the-agent-token); `op` stays off the edge.
 
 4. Apply the Hetzner provider firewall:
 
@@ -94,9 +94,9 @@ Use `agent-box` for a host whose job is to **run containers** and that is admini
 TOOLCHAIN_PROFILE=agent-box packages/skills/hetzner-devbox/scripts/install-toolchain.sh
 ```
 
-**Why the flag exists.** Fluncle's Hermes agent box is documented as "Docker only — deliberately no general dev tooling, for a small blast radius", yet the default `devbox` run installs a full workstation on the host: shells, compilers, a Python and a Node runtime, plus two agent CLIs. Running the written rebuild path therefore produced a materially more-tooled box than the architecture doc described, and nothing flagged the gap. `agent-box` is what that doc describes, expressed as a flag the script enforces rather than a sentence in a runbook.
+Use `TOOLCHAIN_PROFILE=agent-box` to enforce the Docker-oriented host described by the Hermes architecture: the container runtime and self-deploy prerequisites are installed, while general development tooling remains absent.
 
-The `agent-box` floor is chosen, not minimal-for-its-own-sake: `git` + `curl` are what the box's self-deploy needs to pull and build from `main`, `gnupg`/`ca-certificates`/`lsb-release` are what the Docker apt repo needs, and every recurring job on such a box is a systemd unit running `docker exec` — so there is nothing for a shell profile, a compiler, or an interpreter to do on the host. `op` is deliberately **not** one of these groups; it is installed by the bootstrap (see step 3) so a minimal toolchain run can never strand the secret layer.
+The `agent-box` floor includes the tools required for container operation and self-deploy: `git`, `curl`, Docker repository prerequisites, and `op` from the bootstrap.
 
 ## Public SSH App Workflow
 
@@ -159,7 +159,7 @@ packages/skills/hetzner-devbox/scripts/deploy-ssh-app-service.sh
 
 The deploy script uploads the binary, writes `/etc/fluncle-ssh.env`, installs `/etc/systemd/system/fluncle-ssh.service`, reloads systemd, restarts `fluncle-ssh`, and prints service status. Remove local `apps/ssh/dist/` artifacts before committing; the repo ignores `apps/*/dist/`.
 
-`deploy-ssh-app-service.sh` is now the **bootstrap only** (first install / the service contract). Ongoing updates self-deploy — see below.
+Use `deploy-ssh-app-service.sh` for initial installation and service-contract changes. Routine binary updates use the self-deploy flow below.
 
 ### Self-deploy (fluncle-ssh-freshen)
 
@@ -242,5 +242,5 @@ For public SSH app servers, verify:
 - Treat adding `admin` to the Docker group as root-equivalent access and mention that tradeoff when relevant.
 - Ask before creating paid infrastructure when running this skill from an agent session.
 - Keep public SSH app servers minimal. Do not install Docker, Codex, Claude, or general dev tooling unless the user explicitly asks.
-- Provision a container-only host with `TOOLCHAIN_PROFILE=agent-box`. The default `devbox` profile puts a full workstation on the host, which is a wider blast radius than such a box is meant to have.
+- Provision container-only hosts with `TOOLCHAIN_PROFILE=agent-box`; reserve the `devbox` profile for hosts that require the full development toolchain.
 - Public repositories must not contain Hetzner tokens, Tailscale auth keys, private SSH keys, production API tokens, or host-specific secrets.

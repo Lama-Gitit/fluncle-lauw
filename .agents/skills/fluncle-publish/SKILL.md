@@ -5,7 +5,7 @@ description: Publish a Fluncle track's video to social platforms and track per-p
 
 # Fluncle social publishing
 
-You take a track that already has a rendered video in R2 and push it to social platforms, then track where it went and its state on each platform. There are two ways that happens now: the operator's push (this skill's workflows below) and — since the render → publish **auto-advance** landed — the machine's, on its own. Read _The auto-advance_ before you assume a human is between a render and a public feed.
+You take a track that already has a rendered video in R2 and push it to social platforms, then track where it went and its state on each platform. Publishing runs through either an operator-triggered push or the render-to-publish auto-advance. Read _The auto-advance_ for the autonomous path's authorization and readiness gates.
 
 This is the **publish** step of the track lifecycle, after enrichment ([[fluncle-track-enrichment]]) and video creation (the `fluncle-video` skill, which renders + ships the bundle to R2). Per-platform state lives in `social_posts`; the generic track pipeline tops out at "video in R2" (`video_url`).
 
@@ -13,15 +13,13 @@ This is the **publish** step of the track lifecycle, after enrichment ([[fluncle
 
 The manual inbox/draft hand-off exists for exactly one reason — to let a human supply what the platform's API can't. **TikTok** needs it: its licensed/official sounds attach **only inside the app**, and the inbox flow drops the caption, so we push the portrait social cut **silenced** (`footage.social.mp4` served through an `audio=false` Media Transformation) and the operator adds the sound, cover, and caption by hand. **YouTube doesn't need it**: the API carries the title/description and the video's own baked-in audio, so the push posts a Short directly. **Instagram is excluded** — see below.
 
-Both platforms push the same portrait master, `footage.social.mp4` (1080×1920, baked text) — TikTok gets it silenced on the fly via an `audio=false` MT, YouTube gets it with audio. There is **no stored silent file**: `footage-silent.mp4` is retired (a legacy finding without the two-master signal still falls back to `footage.mp4` / `footage-silent.mp4`). The clean SQUARE `footage.mp4` is only the crop source that the MTs derive other orientations from — it is never the cut pushed to a feed (see `docs/video-variants.md`).
+Both platforms push the same portrait master, `footage.social.mp4` (1080×1920, baked text) — TikTok gets it silenced on the fly via an `audio=false` MT, YouTube gets it with audio. Current bundles store no dedicated silent file; TikTok receives `footage.social.mp4` through an `audio=false` transformation. Findings without the two-master signal use the compatibility fallback to `footage.mp4` or `footage-silent.mp4`. The clean SQUARE `footage.mp4` is only the crop source that the MTs derive other orientations from — it is never the cut pushed to a feed (see `docs/video-variants.md`).
 
 | Platform                            | Cut pushed                              | Caption               | Cover                                              | Audio                                                                                                                            | Flow                                                                                                                                                                             |
 | ----------------------------------- | --------------------------------------- | --------------------- | -------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **TikTok** (live)                   | `footage.social.mp4` (`audio=false` MT) | ✗ inbox drops it      | ✗ set in-app                                       | ✗ licensed sound attaches only in-app (the cut is silenced via the MT)                                                           | **Draft → manual finish** in the @fluncle app inbox (`SELF_ONLY`). Operator pastes caption, sets cover, adds the sound, publishes.                                               |
 | **YouTube Shorts** (live)           | `footage.social.mp4`                    | ✓ title + description | ✗ no custom thumbnail (YouTube auto-picks a frame) | ✓ the video's own audio                                                                                                          | **Direct public upload** (Data API v3) on the push — title/description carry. Content ID may _claim_ the clip (rights holder monetizes, we don't) — accepted; the goal is reach. |
 | **Instagram Reels** (not automated) | —                                       | —                     | —                                                  | ✗ a baked-in master gets **muted/removed** on a business/creator account; the licensed library is app-only + locked for business | **Manual, in-app only.** No legitimate API audio path, so the pipeline doesn't post to Instagram.                                                                                |
-
-The takeaway: **draft is the TikTok exception; YouTube posts directly; Instagram isn't automated at all.** Don't add an Instagram push — re-uploading the master gets muted on our account type, and IG's licensed audio can't be attached via API (it's app-only, and locked for business accounts), so the only legitimate IG path is a hand-made post in the app. See `docs/track-lifecycle.md` (Phase 3) for the canonical version.
 
 ## Requirements
 
@@ -69,21 +67,19 @@ fluncle admin tracks draft <track_id|log_id> --platform youtube     # uploads a 
 - **The push is the publish.** The operator's run/click is the only gate — there's no review stage, so push only when the video is final. Postiz doesn't return the public URL on create, so the row lands at `published` with no `url`; record the real link later with `… social … --platform youtube --url <url>`.
 - **Content ID is expected.** A short clip with the master usually gets _claimed_ (the rights holder monetizes it, we don't) rather than blocked — that's accepted; the goal is reach, not revenue. (`unlisted`/`private` is in the schema if a review gate is ever wanted — change `type` in `pushYouTubeShort`.)
 
-## The auto-advance — the machine can now push, and the gate moved
+## The auto-advance
 
-The **render → publish auto-advance** (`docs/track-lifecycle.md` § _The render → publish auto-advance_) closes the last gap in the pipeline: an on-box cron ticks `advance_publish_queue` every 30m, and a freshly-rendered READY finding is pushed **without an operator tap** — the YouTube Short goes public, the TikTok inbox draft lands. The human gate did not disappear; it **moved**, from a per-push tap to a single global switch plus a set of readiness gates:
+An on-box cron runs `advance_publish_queue` every 30 minutes. Eligible findings publish to YouTube and enter TikTok's private inbox automatically. Authorization comes from the global pause/resume switch and the readiness gates below.
 
 - **The kill switch** — `fluncle admin publish pause` / `resume`, or the toggle in the `/admin/findings` header. **Default-deny:** only an explicit `false` in the `publish_advance_paused` setting means running, so an unset flag reads as PAUSED. One flip, effective within one tick, no deploy.
 - **The readiness gates (Worker-side, not yours to reimplement)** — a finding is only advanced when it has a coordinate, a finalized render with BOTH masters (`video_squared_at`), 15 minutes of settle, its whole publishable bundle served on R2 (the server-side mirror of the CLI's `bundle_incomplete` guard), and a non-empty caption.
 - **Never twice** — the advance claims the `(track, platform)` row atomically before any Postiz call, and it only ever picks a platform with **no row at all**. A `failed` push is therefore **never auto-retried**: the finding keeps its row in the `/admin` attention queue and the operator owns the retry (the manual workflows below are exactly that retry).
 
-**What this means for you as an agent:** the auto-advance is a Worker op driven by a box cron, not something you fire. Do not add a second path that pushes YouTube on the agent's behalf — `draft_track_social` still 403s an agent-tier YouTube push, and that is deliberate. If a finding is not going out, read the tick's `held` reasons (`fluncle admin publish advance --json`) rather than pushing around the gate.
+Treat auto-advance as the sole autonomous publishing path. Agent-tier YouTube pushes receive 403. Diagnose held findings with `fluncle admin publish advance --json`.
 
 ## Instagram — manual for FINDINGS; automated for set CLIPS
 
-Don't push a **finding's** video to Instagram from the CLI/board. Baking a single copyrighted master into a Reel gets muted/removed on our business/creator account, and IG's licensed audio is app-only (and locked for business), so there's no legitimate automated path for a finding. Any Instagram presence for a finding is a hand-made post in the IG app.
-
-**A set CLIP is the exception, and it IS automated** (the clip drip-feed — a separate object from a finding). A clip is cut from a live-mixed DJ _set_, which fingerprints differently from a single master, so its own audio survives on IG (the audio-survival spike passed). Clips auto-enter a jittered ~daily Instagram queue and drip out through Postiz as Reels; a global kill switch halts everything if a clip gets struck. That flow lives in the `fluncle-mixtapes` skill (clips are set-derived), not here. This skill stays finding-only: **no `--platform instagram` for a finding.**
+**A set CLIP is the exception, and it IS automated** (the clip drip-feed — a separate object from a finding). Set clips use their live-mixed set audio and publish through the automated Instagram clip queue documented in the `fluncle-mixtapes` skill. This skill stays finding-only: **no `--platform instagram` for a finding.**
 
 ## Platforms
 
@@ -93,7 +89,7 @@ Don't push a **finding's** video to Instagram from the CLI/board. Baking a singl
 
 ## Rules
 
-- **Never public without a gate — and the gate is now the switch, not a tap.** A **YouTube push goes straight to a public feed.** From the CLI/board it is an operator action (the run/click is the approval) and `draft_track_social` 403s an agent-tier YouTube push — that guard stays. The ONE sanctioned autonomous path is the auto-advance (above), where the approval is the operator's kill switch plus the readiness gates. Never build a second one. The TikTok push is safe for an agent either way — it lands in the private inbox (`SELF_ONLY`) and a human still finishes it in-app.
+- **Never public without a gate.** YouTube publishing is authorized through either an operator CLI/board action or the auto-advance's global switch plus readiness gates. `draft_track_social` rejects agent-tier YouTube pushes. TikTok agent pushes land in the private `SELF_ONLY` inbox for human completion.
 - **Video first.** No `video_url` → refuse; render + ship it before publishing.
 - **Right cut per platform.** Both push the portrait `footage.social.mp4`: TikTok gets it silenced via an `audio=false` MT (sound added in-app); YouTube gets it with its own audio. (`footage.mp4` is the clean square crop source, never a feed cut.)
 - **One post per (track, platform).** Re-running the push refreshes the existing record, not a duplicate. (The auto-advance leans on the same unique index for its atomic claim — that row is the double-publish guard.)

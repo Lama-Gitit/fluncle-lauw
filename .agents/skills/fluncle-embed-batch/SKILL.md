@@ -16,10 +16,10 @@ The on-box `fluncle-embed` sweep embeds ~a dozen tracks a day on rave-02's CPU. 
 
 This is the same job in a bigger shape: `embed-batch.ts` takes tracks off the **same** `list_track_work?kind=embed` queue, pulls their audio from private R2, embeds them, and writes the vectors back through the **same** agent-tier API. Two places to run it:
 
-| Target                  | Speed                                             | Cost              | Best for                                                         |
-| ----------------------- | ------------------------------------------------- | ----------------- | ---------------------------------------------------------------- |
-| **M5 (this Mac, CPU)**  | ~1,100+/overnight (~2.5/min, measured 2026-07-27) | free (owned)      | backlogs up to a few thousand; no provisioning, run it and sleep |
-| **RunPod GPU (rented)** | ~21/min (~1,300/hr)                               | paid, by the hour | large backlogs (many thousands) you want cleared fast            |
+| Target                  | Speed                                                                    | Cost              | Best for                                                         |
+| ----------------------- | ------------------------------------------------------------------------ | ----------------- | ---------------------------------------------------------------- |
+| **M5 (this Mac, CPU)**  | ~2.5/min benchmark; use the current run's `tracksPerMinute` to size work | free (owned)      | backlogs up to a few thousand; no provisioning, run it and sleep |
+| **RunPod GPU (rented)** | ~21/min (~1,300/hr)                                                      | paid, by the hour | large backlogs (many thousands) you want cleared fast            |
 
 The M5 runs on **CPU, not the Metal GPU** — `embed-track.py` only branches `cuda` vs `cpu` (`auto` → cpu when there's no CUDA), and that is deliberate: the decode → window → mean-pool → L2-normalize pipeline _is_ the embedding contract, and a second copy of it on a different device is how two vectors of the "same" track silently stop being comparable. Don't add an `mps` path to make the M5 "faster" — you'd fork the vector space.
 
@@ -50,9 +50,9 @@ Both targets need the same four. **The concrete `op://` item paths and the M5 mu
 
 Plus `PYTHON_BIN` → the muq venv's `python3` (its exact path is in the private runbook; on a RunPod pod the bootstrap script installs muq for you).
 
-**The R2 trap that costs ~40 minutes if you miss it:** the source-audio creds live in the source-audio R2 item's **custom section fields** (`account_id` / `access_key_id` / `secret_access_key`) — the item's template fields (`username` / `credential`) are **empty decoys**, and `op item get | head` truncates the list right before the real ones. And the generic `R2_ACCESS_KEY_ID` from `.dev.vars` is the **public** bucket — it 403s the private source-audio bucket, which shows up as `downloadFailed` = the whole batch and a `queue_blocked` stop. Use the source-audio-specific creds, from the custom fields.
+Use the source-audio R2 item's custom `account_id`, `access_key_id`, and `secret_access_key` fields. The template fields are unused, and the generic public-bucket key cannot read private source audio.
 
-**An AI agent CAN run this end-to-end — this is the whole point of the skill.** `op` authenticates through the 1Password desktop-app integration, so an agent just runs the real `op read '<ref>'` **directly** (with the sandbox OFF, so `op` reaches the app socket) — the command surfaces the biometric prompt on the operator's machine, they approve **once**, and it proceeds (the session is cached for a few minutes, so the follow-up reads don't re-prompt). Two hard rules that waste turns every time they're forgotten:
+An agent can run the workflow end to end after the operator approves the first biometric prompt. `op` authenticates through the 1Password desktop-app integration, so an agent runs the real `op read '<ref>'` **directly** (with the sandbox OFF, so `op` reaches the app socket). Follow these two requirements:
 
 - **NEVER run `op signin` or `op whoami` first.** In a non-TTY agent shell they _always_ report "account is not signed in" — they do NOT reflect whether `op read` will work, and it will. Skip the check; run the real read.
 - **Source the token env file with `set -a`** (`set -a; source ~/l/.env.production; set +a`) — a plain `source` sets `FLUNCLE_API_TOKEN` as a shell var but does NOT export it, so the `bun` child process can't see it and the run aborts `missing_api_token`. (The R2 vars are `export`ed explicitly below, so they're fine either way.)
@@ -63,7 +63,7 @@ The one thing genuinely reserved for the operator is the single fingerprint appr
 
 ## Path A — the M5 overnight run
 
-Free, unmetered, ~1,100+ tracks a night on the M5's CPU (2.47/min measured on the 2026-07-27 run, queue_dry after 1,119). The right default for a backlog of a couple thousand or less. Because it's not billed, over-provision `--minutes` — the run stops on its own when the queue is dry.
+Free, unmetered, typically about 2.5/min; size the run from its current measured rate. The right default for a backlog of a couple thousand or less. Because it's not billed, over-provision `--minutes` — the run stops on its own when the queue is dry.
 
 Run this directly (agent or operator, **sandbox OFF** so `op` reaches the app socket), from the repo root. The three `op read`s trigger one biometric prompt the operator approves:
 
@@ -91,9 +91,9 @@ The **Mac must stay awake** for the night — make sure a `caffeinate` is runnin
 
 ## Path B — the RunPod GPU rental
 
-Paid, fast, for large backlogs. **An agent drives this end-to-end** — provision, run, monitor, destroy — because a `RUNPOD_API_KEY` lives in the vault next to the other secrets (concrete `op://` path: the private companion runbook). Earlier versions of this skill said a pod could only be rented by hand; that is no longer true, and the dashboard is not part of the loop. The architecture is [`docs/gpu-batch-embed.md`](../../../docs/gpu-batch-embed.md); this is the operating procedure.
+Paid, fast, for large backlogs. **An agent drives this end-to-end** — provision, run, monitor, destroy — because a `RUNPOD_API_KEY` lives in the vault next to the other secrets (concrete `op://` path: the private companion runbook). The architecture is [`docs/gpu-batch-embed.md`](../../../docs/gpu-batch-embed.md); this is the operating procedure.
 
-Everything below was measured on a live run, 2026-07-26. The traps are the expensive part — a pod that is up and billing but silently doing nothing looks exactly like a pod that is working.
+Verify progress from the falling embed queue or the log over SSH; pod status alone does not establish batch health.
 
 **The short version, when the ask is just "drain the embed queue on RunPod".** Read `RUNPOD_API_KEY` + the four embed secrets from `op` (one biometric approval), size the queue, then:
 
@@ -118,7 +118,7 @@ Both take `Authorization: Bearer $RUNPOD_API_KEY`. Two shape traps: REST has **n
 
 ### Pick the GPU
 
-MuQ-large is ~300M params and the job is download- and VRAM-bound, not FLOPs-bound, so cheapest-with-enough-VRAM wins. Anything ≥16 GB is plenty; an **RTX A5000 (24 GB)** was the sweet spot at ~$0.16–0.27/hr. Pass several ids in `gpuTypeIds` (priority order) so provisioning falls through when the cheap one is unavailable.
+MuQ-large is ~300M params and the job is download- and VRAM-bound, not FLOPs-bound. Choose the cheapest available GPU with at least 16 GB VRAM; query current prices before provisioning. Pass several ids in `gpuTypeIds` (priority order) so provisioning falls through when the cheap one is unavailable.
 
 ### Create the pod — let the image start itself
 
@@ -175,7 +175,7 @@ Run the poll loop as a **detached process that holds the `DELETE`**, so the pod 
 
 ### The GPU is not the bottleneck — the downloads are
 
-Sampled during a live run, the GPU sat at **0% utilization seven samples out of eight**, spiking to ~16% and ~1.5 GB VRAM in short bursts between long waits on R2. The pod spends most of its life fetching audio, which is why a cheap 16–24 GB card is genuinely enough and why a beefier one buys you almost nothing. If a run needs to go faster, raise `FLUNCLE_EMBED_DOWNLOAD_CONCURRENCY` (12 was comfortable) before reaching for a bigger GPU — and remember the pod bills the idle time either way.
+The job is normally R2-download-bound. Prefer a low-cost 16–24 GB GPU and raise `FLUNCLE_EMBED_DOWNLOAD_CONCURRENCY` within tested limits before selecting a larger GPU.
 
 ### `--minutes` and the clock
 
@@ -201,19 +201,9 @@ fluncle admin catalogue rank --limit 250 --json    # repeat while the ranker rep
 
 An embedded-but-unranked track is in the archive but not yet placed in The Ear's ordering, so it won't surface in recommendations or "sounds like" until this runs. This is the step that turns "embedded" into "recommendation-eligible".
 
-## Pitfalls, collected
+## Pitfalls
 
-- **The M5 embeds on CPU by design** — no `mps` path. Faster-looking on paper, but a different device drifts the vectors out of the shared space. Leave it.
-- **Wrong R2 creds → silent 403** — the generic `.dev.vars` R2 key is the public bucket; `downloadFailed` = batch size and `queue_blocked` is the tell. Use the source-audio R2 item's custom fields.
-- **`missing_r2_credentials`** is an empty env var (an `op read` returned nothing), never a code bug — the dry-run catches it before you commit a night or an hour.
-- **The run is clock-bound, not queue-bound** — on RunPod set `--minutes` as a backstop and let the monitor destroy on drain; on the unmetered M5 over-provision and let it dry out.
-- **A silent pod looks exactly like a working pod** — RunPod has no logs API, and a bootstrap that died still leaves the pod `RUNNING` and billing. Never infer health from pod status; infer it from the embed queue falling, or from the log over SSH.
-- **`dockerStartCmd` buys you a blind pod** — it replaces the template CMD that starts `sshd`, so you lose the only way in. Let the image boot itself and launch the batch over SSH.
-- **The pod's env is in PID 1, not your shell** — SSH in and the injected secrets are simply absent (`/etc/rp_environment` only carries RunPod's own vars). Import from `/proc/1/environ`.
-- **`pip install muq` resolves deps that break the image** — unpinned, it takes transformers 5.x and numpy 2.x, both fatal against the template's torch 2.1, and neither errors at install time. The bootstrap pins `transformers==4.40.2` + `numpy<2`; keep the pins if you touch it.
-- **Do not abort a slow start too early** — cold setup runs tens of minutes before the first embed. A 45-minute never-started guard killed a healthy pod mid-warmup on the first attempt.
-- **Always resumable** — an embedded track leaves the `embedding_blob IS NULL` queue and write-back is per-track, so a reclaimed pod or a slept Mac loses nothing. Just launch again.
-- **The batch can only measure, never speak** — it sends `{ embedding }` and nothing else; the certification rail 409s anything that would make Fluncle _say_ something about a track. Safe to run against uncertified catalogue rows all day.
+The owning sections above define the safeguards: _Path A_ owns the CPU-only M5 path; _The four env vars_ owns the private R2 credentials; _The API_ and _Create the pod_ own pod health, `dockerStartCmd`, PID 1 environment import, and dependency pins; _Monitor from the Mac_ owns slow-start and teardown guards; _`--minutes` and the clock_ owns clock-bounded sizing; _Reading the result_ owns resumability and queue state; and the architecture document owns the certification rail.
 
 ## Where the concrete detail lives
 

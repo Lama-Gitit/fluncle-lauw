@@ -2,12 +2,9 @@
 name: fluncle-rekordbox-sync
 description: >-
   Sync the operator's Rekordbox library — the DJ-graded ground truth for musical
-  key and BPM — into Fluncle's archive on a PERIODIC schedule. Rekordbox analyses
-  the whole song and the DJ hand-corrects it. Fluncle's DSP now analyses the captured
-  full song too and its BPM agrees with Rekordbox to within ~0.02, but its KEY is the
-  weaker signal: it leaves `tracks.key` NULL below a confidence floor, and mode errors
-  (major vs minor on the right tonic) have been observed. So key is what this sync is
-  really for. This skill reads
+  key and BPM — into Fluncle's archive on a PERIODIC schedule. Rekordbox provides
+  DJ-graded key and BPM. Fluncle DSP supplies BPM and confidence-gated key analysis;
+  this sync reconciles Rekordbox values into the archive under the source hierarchy. This skill reads
   every Rekordbox key + BPM, matches
   each to a finding by normalized title+artist, and writes the graded values back via
   `fluncle admin tracks update --key-source rekordbox` / `--bpm-source rekordbox` so
@@ -15,16 +12,14 @@ description: >-
   later agent-tier DSP pass. Dry-run by default with a max-writes fuse; the operator
   runs it (or the weekly launchd timer runs it) on the M2 mixing Mac where Rekordbox
   lives. Use when the user asks to sync Rekordbox keys/BPMs into Fluncle, set up or
-  run the periodic key/BPM sync, or invokes it by name. SUBSUMES the retired
-  fluncle-key-backfill skill (its matcher lives on here).
+  run the periodic key/BPM sync, or invokes it by name.
 ---
 
 # Fluncle Rekordbox Sync
 
 The periodic reconciliation of the operator's DJ-graded key + BPM (Rekordbox, the
-ground truth) into Fluncle's findings archive. It replaces the one-shot
-`fluncle-key-backfill` skill: the ported matcher + `normalize_key` live here verbatim,
-and the sync now covers BPM as well as key and runs unattended on a weekly timer.
+ground truth) into Fluncle's findings archive. This weekly reconciliation syncs both
+key and BPM. Its matcher and `normalize_key` implementation live in this skill.
 
 ## Where this runs
 
@@ -48,8 +43,8 @@ production archive through the authenticated admin API (never the DB directly).
 
 - **Dry-run is the default.** The script proposes and writes nothing until `--apply`.
 - **`--max-writes N` (default 20) is a fuse.** If the proposed write count exceeds it, the run writes NOTHING and exits non-zero — a blown join or a mass Rekordbox re-grade fails loudly for an unattended run rather than half-applying. Eyeball the diff, then raise the fuse if it is genuinely all correct.
-- **The server hierarchy guard is the real backstop.** Even a buggy `--apply` can never overwrite an operator-graded value: the agent-tier guard in `apps/web` `track-update.ts` drops a `rekordbox` write onto an `operator` row. Operator stamps are never clobbered.
-- **Match discipline (ported, unchanged).** Normalized title+artist, never ISRC (Rekordbox's is unreliable). Case/accents/`&`↔`and` folded, `feat.` credits dropped. A remix/VIP/edit keeps its mix-descriptor as identity, so "Song (Calibre Remix)" never matches the original "Song". An unparseable Rekordbox key normalizes to nothing and yields no proposal.
+- **The server hierarchy guard is the real backstop.** The server hierarchy guard drops `rekordbox` writes when the stored source is `operator`, preserving operator-graded values.
+- **Match discipline.** Normalized title+artist, never ISRC (Rekordbox's is unreliable). Case/accents/`&`↔`and` folded, `feat.` credits dropped. A remix/VIP/edit keeps its mix-descriptor as identity, so "Song (Calibre Remix)" never matches the original "Song". An unparseable Rekordbox key normalizes to nothing and yields no proposal.
 
 ## Requirements
 
@@ -74,8 +69,6 @@ uv run packages/skills/fluncle-rekordbox-sync/scripts/rekordbox_sync.py --apply 
 ```
 
 Flags: `--max-writes N` (fuse, default 20), `--fluncle-bin ./path/to/fluncle`, `--db /path/to/master.db` (default: auto-detect), `--self-test` (run the pure-rule checks and exit).
-
-On this M5 mirror, a dry-run after a fresh sync should propose ≈0 changes — a near-empty diff is the expected in-sync result.
 
 ## One-time M2 setup (the weekly timer)
 
@@ -116,5 +109,5 @@ uv run packages/skills/fluncle-rekordbox-sync/scripts/rekordbox_sync.py --self-t
 ## Notes
 
 - The normalizer's `NOTES` array is a faithful copy of the enrichment DSP's spelling (`analyze-track.ts` `NOTES`, sharps). Keep it identical — a normalized key MUST equal what the DSP would have stored, so a value comparison is honest.
-- The matcher (`_fold` / `_normalize_artists` / `_split_title` / `match_key`) is the same one mirrored in the TS `apps/web/src/lib/server/track-match.ts` and the mixtapes `_matching.py`. This skill's `scripts/rekordbox_sync.py` is now its canonical Python home (it moved here from the retired key-backfill).
+- `scripts/rekordbox_sync.py` is the canonical Python implementation shared conceptually with `apps/web/src/lib/server/track-match.ts` and the mixtapes `_matching.py`.
 - `pyrekordbox` tracks Rekordbox's encrypted schema and can break on a Rekordbox update — another reason this is a local, operator/timer job on the M2, not a server cron.

@@ -5,7 +5,7 @@ description: Use when working in the Fluncle repository on the Bun/Turborepo mon
 
 # Fluncle Operator
 
-`AGENTS.md` at the repo root is the standing law and this skill does not restate it: its **Architecture** section owns the module boundaries (`apps/web` owns the public and admin API surfaces, the CLI is a thin HTTP client, Raycast calls `fluncle` rather than reimplementing Spotify/Telegram/Turso, publishing authority stays behind the authenticated admin API), and its **Quality Checks** section owns which commands to run for the surface you touched. Read them there — a second copy here only rots.
+`AGENTS.md` is the canonical source for architecture and quality checks. Refer to those sections directly here to keep one maintained definition.
 
 What this skill adds is the per-surface routing below and the gotchas AGENTS.md is too high-level to carry.
 

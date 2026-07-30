@@ -15,7 +15,7 @@ description: >-
 
 # Fluncle surface smoke
 
-Confirm every surface still answers at the right tier after a change. This is route/surface **RESOLUTION** ("does the endpoint exist and answer correctly?") — the complement to `/status` + `fluncle status`, which cover service **HEALTH** (web / r2 / dns / ssh / crons / render-box / hermes up?). Together they're full coverage; this one catches the class a service probe sails past — a deleted or moved route returning `404` (the #227 dormant-file-route cleanup was exactly this risk).
+Confirm every surface still answers at the right tier after a change. This is route/surface **RESOLUTION** ("does the endpoint exist and answer correctly?") — the complement to `/status` + `fluncle status`, which cover service **HEALTH** (web / r2 / dns / ssh / crons / render-box / hermes up?). This sweep catches deleted or moved routes that return `404` while service-health probes remain green.
 
 It is a skill, not a command, on purpose: surfaces shift, and judging each result (regression vs. POST-only op vs. expected-by-design) needs reasoning a frozen script can't carry. Half the job is interpretation — see **Judgment** below.
 
@@ -46,11 +46,11 @@ Default prod `https://www.fluncle.com`. For a pre-merge PR, smoke its Cloudflare
 - **Method matters.** POST-only ops (`backfill`, `mixtape youtube`, `mixcloud/token`) return `404` to a GET — probe each op with its real method or you raise false alarms.
 - **`401` on admin is healthy** (served + auth-gated); `404` is dead. Never read `401` as a failure.
 - **og vs cover.** `/api/og/<id>` is findings-only; mixtapes use `/api/mixtape-cover/<id>`. A mixtape logId correctly `404`s on `/api/og`.
-- **CLI commands are plural + canonical** (`tracks get`, not the retired `track` alias). A removed alias failing with `unknown command` is a pass, not a break.
+- **CLI commands are plural + canonical.** Probe the canonical plural command `tracks get`; `track` is outside the supported surface, so an `unknown command` response is expected.
 - **`record_health` POSTs abort transiently during a Worker redeploy** — a `/status` blip right after a merge is the deploy settling, not an outage; re-check after ~1 minute.
 - **Auth-gated UI can't be probed headless** — the admin API returning `401` is the proxy signal; flag the UI itself as eyeball-only.
-- oRPC is mounted ahead of TanStack in `server.ts`, so a path owned by a contract op is served by oRPC even where a file-route once lived — the basis for the "never 404" assertion (the oRPC-default principle lives in `AGENTS.md` Architecture).
+- A contract-owned path is served by oRPC because `server.ts` mounts oRPC ahead of TanStack — the basis for the "never 404" assertion (the oRPC-default principle lives in `AGENTS.md` Architecture).
 
 ## Report
 
-A pass/fail table grouped by surface kind, leading with any `404` / unexpected status as the investigate list. Resolve each anomaly to "regression" or "expected (which gotcha)" before calling it clean — an unexplained `404` is never a pass. The service-health side is the `fluncle-monitoring-stack-live` memory; the oRPC carve-out map is `orpc-migration-complete`.
+A pass/fail table grouped by surface kind, leading with any `404` / unexpected status as the investigate list. Resolve each anomaly to "regression" or "expected (which gotcha)" before calling it clean — an unexplained `404` is never a pass. Use `/status` for service-health context and the canonical oRPC architecture in `AGENTS.md` for routing context.

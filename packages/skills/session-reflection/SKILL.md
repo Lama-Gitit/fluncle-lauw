@@ -1,32 +1,22 @@
 ---
 name: session-reflection
 description: >-
-  Mine a working session for durable improvements to how AI agents work in this
-  repo, and route each lesson to its RIGHT home (a test/hook, a code fix, a
-  skill, a memory, or — rarely — a standing instruction), never just appending
-  prose. Use this at the END of any substantial session, or whenever the
-  operator says "reflect on this session", "what did we learn", "any takeaways",
-  "should we update the docs/skills/memory after this", "self-improve", "run a
-  retro", or asks how to keep the codebase's agent guidance sharp. Also reach for
-  it when a session hit repeated friction, a stale instruction, or a correction
-  the operator had to repeat — those are exactly the lessons this captures. Do
-  NOT use it for writing product features or copy; this is about improving the
-  agent harness itself.
+  Mine a substantial working session for durable improvements to the repo's agent harness. Route each lesson to the strongest appropriate home: code fix, executable guardrail, scoped skill, memory, or standing instruction. Use when the operator requests reflection or when repeated friction, stale guidance, or corrections reveal a durable gap. Keep product implementation and copy work outside this skill.
 ---
 
 # Session reflection — route the lessons, guard the constitution
 
-You are closing out a working session on this codebase. Mine what actually happened for durable improvements to how AI agents work here — and route each lesson to the right home, which is usually NOT another sentence of instructions.
+Mine the session for durable improvements and route each lesson to the strongest appropriate home.
 
-The deep reason this skill exists as a _router_ rather than a "CLAUDE.md appender": every added rule dilutes every existing rule (model adherence measurably degrades as instruction files grow — the "context rot" effect, and Anthropic's own guidance names bloat as why Claude ignores instructions). A reflection habit whose only move is "write it down" makes the guidance worse over time. The valuable question is always _where does this lesson belong_, and prose is the answer of last resort.
+Instruction-file growth reduces model adherence. Choose the home that enforces the lesson with the least prose; use standing guidance only when stronger mechanisms do not fit.
 
 ## Ground rules (they bind everything below)
 
-1. **Prose is the last resort.** The routing ladder runs strongest home → weakest; a lesson lands at the FIRST rung that can hold it, and reaches "standing instruction" only when nothing above it can.
-2. **No receipt, no proposal.** Every finding cites the concrete session moment that earned it: the failed tool call, the operator's correction, the wrong deploy, the turns it cost. A lesson you cannot point at did not happen — this is the antidote to overfitting a one-session idiosyncrasy into a permanent rule.
+1. **Prose is the last resort.** Route each lesson through the ladder from strongest to weakest, stopping at the first suitable home. Use standing instructions only when no stronger rung fits.
+2. **No receipt, no proposal.** Every finding cites concrete session evidence: tool output, an operator correction, a deployment result, or measurable recovery effort. Propose only lessons supported by evidence.
 3. **One occurrence is an episode, not a rule.** A standing-instruction proposal needs the pattern to have bitten at least twice (in this session, or once here plus a prior memory/doc scar). Single occurrences route to memory at most — or to nothing.
-4. **Never regenerate a file.** Propose minimal diffs against curated files (exact old text → new text). Full-file rewrites are how curated playbooks collapse — a single bad rewrite can silently gut hard-won specifics.
-5. **Hard cap: at most 5 proposals**, ranked by expected cost-of-recurrence. If you found more, the overflow dies in one line, no detail. A long session yields dozens of plausible tweaks; most are noise.
+4. **Never regenerate a file.** Propose minimal diffs against curated files, using exact old text and replacement text so existing specifics remain intact.
+5. **Hard cap: at most 5 proposals**, ranked by expected cost of recurrence. Summarize any remaining candidates in one line.
 6. **Pruning counts as improvement.** Actively hunt deletions: rules now enforced by CI/tests/hooks, stale paths, contradictions, shipped-work references, memories this session proved wrong. The instruction budget should trend flat or down; propose an eviction alongside any addition to an already-long file.
 7. **Never propose weakening safety rails, autonomy boundaries, or operator gates — including for yourself.**
 
@@ -37,7 +27,7 @@ For each candidate lesson, take the FIRST rung that fits:
 | Rung                     | When                                                                                            | Home                                                                                                               |
 | ------------------------ | ----------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
 | **Code fix**             | The lesson papers over a real defect                                                            | Fix the code (or file the fix as the proposal)                                                                     |
-| **Executable guardrail** | Recurring AND mechanically checkable                                                            | A test, lint rule, hook, coverage gate, or CI step — agents can ignore prose, not a red check                      |
+| **Executable guardrail** | Recurring AND mechanically checkable                                                            | Encode the lesson in a test, lint rule, hook, coverage gate, or CI step                                            |
 | **Skill / scoped rule**  | A procedure or gotcha tied to one workflow or one part of the tree                              | The relevant skill in `packages/skills/**` (then `bun run skills:install`), or a path-scoped `.claude/rules/` file |
 | **Memory**               | Narrow, situational, or single-occurrence but worth recall                                      | The persistent memory system (one fact per file, indexed in `MEMORY.md`)                                           |
 | **Standing instruction** | Broad, durable, un-checkable, ≥2 occurrences, and a new teammate would need it in every session | `AGENTS.md` (or the relevant canon doc) — the rarest outcome                                                       |
@@ -46,7 +36,7 @@ The spine, from Anthropic's own guidance: _if Claude already does the thing righ
 
 ## What to hold the session against
 
-Skim (you know most of it): `CLAUDE.md` → `AGENTS.md`; the skills that were loaded or SHOULD have been loaded this session (`packages/skills/**`); `.claude/agents/*`, `.claude/rules/*`, hooks and settings under `.claude/`; the memory index (`MEMORY.md`) and any recalled memory files; and the CI enforcement points (the deploy gate, the coverage/naming/guardrail tests). "Could this be a test?" is the question that beats "where do I write this down?".
+Review `AGENTS.md`, the loaded or applicable skills, agent rules, hooks, memory, and CI enforcement points. Ask whether executable enforcement can hold each lesson before choosing prose.
 
 ## Signal sources, in priority order
 
@@ -58,7 +48,7 @@ Skim (you know most of it): `CLAUDE.md` → `AGENTS.md`; the skills that were lo
 
 ## Output
 
-First, an **"Already routed in-session"** line: lessons handled live during the session (a rule already added, a fix already shipped), listed one-line each so they are not re-proposed. This is not filler — a well-run session routes most lessons as it goes, and naming them proves the process worked and keeps the table below to the genuinely-open items.
+Start with an `Already routed in-session` line listing lessons handled during the session, one line each. This keeps the ranked table focused on open items and prevents duplicate proposals.
 
 Then present ONE ranked table and stop for ratification:
 
@@ -70,4 +60,4 @@ The operator replies with numbers to approve (e.g. "1, 3, 4"). Then implement ex
 
 ## Before you trust anything you added
 
-If a proposal was itself a _detector_ — a new test, guard, hook, or alert meant to catch a failure — prove it fires before trusting it: feed it one synthetic instance of the failure it guards and watch it trip (a known-red input for a CI watcher, a thrown error for an error path). An armed-but-blind detector is indistinguishable from a working one until the day it should have fired and didn't.
+Exercise each proposed detector with a synthetic failing input and verify that it trips before acceptance.

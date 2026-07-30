@@ -61,8 +61,8 @@ but it is forbidden from shipping an index or a stored column: Turso keeps no pl
 whether an index is even picked up is an empirical question only a scratch **hosted** Turso DB answers
 (`turso dev` is not evidence — `docs/local-database.md`). Those findings arrive as ledger rows that
 name the proof gate, and running it is yours: `apps/web/scripts/bench-db-scale.ts` against a scratch
-hosted DB, destroyed after. Five backlog items already died at that gate — the audit is told not to
-re-propose them.
+hosted DB, destroyed after. Record hosted-proof rejections so the audit suppresses already-disproved
+proposals.
 
 **Handle a held PR.** When the reviewer leaves an `audit/*` PR open with a comment, it found a
 high-impact/high-risk problem it wouldn't merge. Read the comment, decide, and merge or close it
@@ -78,8 +78,8 @@ sudo systemctl enable  --now fluncle-audit.timer fluncle-audit-review.timer   # 
 
 ## Invariants (the why)
 
-- **The reviewer is the merge gate; green CI is decisive.** A clean night opens no PR; a held PR is
-  the reviewer working as designed. Don't loosen the reviewer into a rubber stamp.
+- **The reviewer is the merge gate; green CI is decisive.** The reviewer merges only when required
+  CI is green and no high-impact finding remains.
 - **The auditor fixes by confidence, files by impact.** It never edits secrets/`op://`/auth
   tiers/migrations/`.github/workflows`/CI, never uses the TS `!`, and never drives `main` directly —
   only via the reviewed PR. Keep those rails in `_preamble.md`.

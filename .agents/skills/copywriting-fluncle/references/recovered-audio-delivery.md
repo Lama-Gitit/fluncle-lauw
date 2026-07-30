@@ -4,7 +4,7 @@ The spoken-delivery layer for the recovered-audio register. `voice.md` §5 ("Rec
 
 ## The voice
 
-"Fluncle" — a cloned **Cartesia (Sonic)** voice (`CARTESIA_VOICE_ID`), an instant clone of the bespoke read. A weathered man in his early fifties, English with a faint, hard-to-place Dutch accent (fluent but subtly non-native, something off just a touch). Low and slow, dry and deadpan-calm, gravelly and lived-in but awake and present, faintly melancholic, with a touch of distance — as if recovered from far away. He's the uncle saying it to a mate over the tune, not a DJ working a crowd. Cartesia reads **conversationally** — it doesn't drag dreamy scripts the way the old audiobook model did, which is why the voice moved here.
+"Fluncle" — a cloned **Cartesia (Sonic)** voice (`CARTESIA_VOICE_ID`), an instant clone of the bespoke read. A weathered man in his early fifties, English with a faint, hard-to-place Dutch accent (fluent but subtly non-native, something off just a touch). Low and slow, dry and deadpan-calm, gravelly and lived-in but awake and present, faintly melancholic, with a touch of distance — as if recovered from far away. He's the uncle saying it to a mate over the tune, not a DJ working a crowd. Cartesia reads conversationally and keeps dreamy scripts present without dragging.
 
 The voice is swappable: it's the `CARTESIA_VOICE_ID` Worker var in `apps/web/wrangler.jsonc` (a non-secret config var holding the clone id). Change the var to change voices; a per-call `--voice-id` override exists for one-offs but the var is the canon.
 
@@ -12,8 +12,8 @@ The voice is swappable: it's the `CARTESIA_VOICE_ID` Worker var in `apps/web/wra
 
 Cartesia has no stability/style/similarity sliders — the read is the clone plus the `generation_config` delivery steer:
 
-- **`speed: 0.85`** — `DEFAULT_CARTESIA_SPEED` in `observation.ts`. Dialed by ear in the 2026-07-18 bake-off (a listener had flagged the 0.78 reads as flat); Cartesia's speed knob is gentle and non-linear, so this is a lift in presence more than pace. Don't fight it for a much slower read — it won't go there.
-- **`emotion: "excited"`** — `DEFAULT_CARTESIA_EMOTION`, same bake-off. This steers the DELIVERY awake, not the persona: the words stay dry and deadpan-calm (the register rules below are unchanged), and the model reads the emotion against the transcript's own subtext — a no-rush roller stays a no-rush roller, just present instead of flat. The uncle leaning in over the tune, still never a DJ working a crowd.
+- **`speed: 0.85`** — `DEFAULT_CARTESIA_SPEED` in `observation.ts`. Use `speed: 0.85` to keep the read present while preserving its low, unhurried delivery. Cartesia's speed knob is gentle and non-linear, so this is a lift in presence more than pace. Don't fight it for a much slower read — it won't go there.
+- **`emotion: "excited"`** — `DEFAULT_CARTESIA_EMOTION`. Use `emotion: "excited"` to keep the delivery awake without changing the dry, deadpan-calm persona. The model reads the emotion against the transcript's own subtext — a no-rush roller stays a no-rush roller, just present instead of flat. The uncle leaning in over the tune, still never a DJ working a crowd.
 
 ## Pacing — no `<break>` tags
 
@@ -29,7 +29,7 @@ The artist, if it surfaces, rides woven into the read ("Monrroe keeps that half-
 
 ## No earthly geography in the spoken read
 
-Corrected by a real render too. The firecrawl `context_note` is **facts as fuel** — label, year, a producer's origin or scene — and you read it to ground the observation. But the **spoken output must never name earthly geography**: no countries, cities, nationalities, or regions ("American", "US", "UK", "British", "London", "Dutch", and so on). In one render a `context_note` of "US/American producer" leaked straight through as "flies the flag for the American side of the map" — the map broke the fiction. The cosmos replaces the earth: there is no American side of anything in the Galaxy.
+Treat `context_note` as factual grounding only. Spoken output omits countries, cities, nationalities, and regions; translate relevant origin facts into Galaxy terms or drop them. The cosmos replaces the earth: there is no American side of anything in the Galaxy.
 
 When an origin or scene fact wants to come out, do one of two things:
 
@@ -47,7 +47,7 @@ This is the Garnish/Sauce rule applied to the heard surface: the cosmos is scien
 
 ## No catalog recitation
 
-Corrected by ear across every model. The observation is a **voice log — Fluncle sharing what a track did to him, not reading a catalogue entry**. The single worst tell is the metadata recitation: a flat "Title. Label. Year." line dropped mid-read ("Days Like These. Soul Deep Digital, 2016."). It reads like a database row spoken aloud — no model can make it conversational, and it is **redundant**: the title, artist, label, and year are already on screen next to the audio (the `/log` page and the radio meta block render them). Reading them out loud is dead weight on the one surface where every second of attention is heard.
+The observation is a voice log about what the track did to Fluncle. Do not recite title, label, and year as metadata; weave an artist or title into the talk only when it sounds conversational. The title, artist, label, and year are already on screen next to the audio (the `/log` page and the radio meta block render them).
 
 So the `context_note` facts (label, year, scene) are **fuel, not lines**. They ground the _feel_ of the observation; they are never recited:
 

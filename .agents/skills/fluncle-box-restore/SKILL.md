@@ -1,14 +1,14 @@
 ---
 name: fluncle-box-restore
 description: >-
-  Rebuild or restore Fluncle's rave-02 agent box (the Hermes/devbox host running every automation sweep) after it is lost, and prove ahead of time that it could be. USE THIS whenever the box is gone, dead, deleted, wiped, unreachable, or being replaced: "rave-02 is gone", "the box died", "rebuild the box", "restore the agent box", "the devbox is dead", "provision a replacement box", "restore the box-state backup", "the crons all stopped and the box is unreachable", "disaster recovery". USE IT EQUALLY for the preventive "could we actually restore the box if we had to?" / "drill the restore", which its read-only preflight answers in one safe command. It is the ordered runbook — provision → harden → op → bootstrap token → secret templates → host timers → image → restore box state → verify — plus the ordering traps that cost hours. NOT for changing a live box (model, voice, pins, crons): that is fluncle-hermes-operator. NOT generic Hetzner VPS profiles: that is hetzner-devbox, which this skill calls and sequences.
+  Rebuild or restore Fluncle's rave-02 agent box (the Hermes/devbox host running every automation sweep) after it is lost, and prove ahead of time that it could be. USE THIS whenever the box is gone, dead, deleted, wiped, unreachable, or being replaced: "rave-02 is gone", "the box died", "rebuild the box", "restore the agent box", "the devbox is dead", "provision a replacement box", "restore the box-state backup", "the crons all stopped and the box is unreachable", "disaster recovery". USE IT EQUALLY for the preventive "could we actually restore the box if we had to?" / "drill the restore", which its read-only preflight answers in one safe command. It is the ordered runbook — provision → harden → op → bootstrap token → secret templates → host timers → image → restore box state → verify — plus the load-bearing ordering constraints. NOT for changing a live box (model, voice, pins, crons): that is fluncle-hermes-operator. NOT generic Hetzner VPS profiles: that is hetzner-devbox, which this skill calls and sequences.
 ---
 
 # Fluncle box restore — putting rave-02 back
 
 rave-02 is the box every Fluncle automation runs on: the Hermes chat gateway plus ~44 host systemd timers driving the `--no-agent` sweeps. This skill is the one entry point for **resurrecting it**, and for answering the cheaper question — _could we?_ — before you ever need to.
 
-Everything the rebuild needs already exists. The problem this skill solves is that it exists in six places across two repos, and nothing used to route you to them. **Do not reconstruct any of it from source.** Each step below names the asset that does the work; follow the link, run the thing, come back.
+The rebuild is assembled from the linked assets across the public repository and private companion; follow them in the order below. **Do not reconstruct any of it from source.** Each step below names the asset that does the work; follow the link, run the thing, come back.
 
 **Neighbours, so the right skill wins:** [`fluncle-hermes-operator`](../fluncle-hermes-operator) changes a box that is still alive (model, voice, pins, secrets, crons). [`hetzner-devbox`](../hetzner-devbox) is the generic VPS provisioning kit. This skill is the box being **gone**, and it drives both of those in order.
 
@@ -65,7 +65,7 @@ The order is load-bearing. Each step names the asset that does the work.
 
 **8. Build and run the container.** First build is manual, from the **repo root**, `-f docs/agents/hermes/Dockerfile` — see [`hermes-agent.md` § The image / § Run](../../../docs/agents/hermes-agent.md) for the build and the canonical `docker run` flags; the concrete env-file path is in the labs doc.
 
-**9. Re-run the secrets sync.** Yes, again. See the gotchas — this is the step people skip.
+**9. Re-run the secrets sync after the container has started once so its bind mount receives the sweep environment.**
 
 **10. Restore the box state** into the **stopped** container, then start it. Procedure: [`backup-timer/README.md` § Restoring from leg 2](../../../docs/agents/hermes/backup-timer/README.md). Drill it first with `preflight.ts --drill` so you are unpacking something you have already proven opens.
 
@@ -75,14 +75,12 @@ Self-deploy resumes on its own once the box is up: [`pin-watch`](../../../docs/a
 
 ## The gotchas
 
-Each of these has bitten. They are the reason this skill is a runbook and not a list of links.
-
 - **Container before sweep env, then sync again.** The secrets sync writes the sweep env file _into the container's bind mount_, which does not exist until the container has started once. On a fresh box the first sync half-succeeds: the gateway env lands, the sweep env does not, and every sweep runs credential-less. Sequence is **bootstrap → sync → container → sync again**.
 - **Restore box state into a STOPPED container.** `state.db` is live SQLite; unpacking over a running gateway corrupts it. Untar with `tar` (not a copy tool that drops modes) — it preserves the `0600` on the restored env files, and that is load-bearing.
-- **Tailscale key expiry, before anything else.** No public inbound TCP means an expired node key is a total lockout with no fallback path. Disable expiry (or join the node tag-owned so it is exempt), then verify from a second terminal _before closing the first_. Getting this wrong costs you the box you just built.
-- **`op` before any secret is read.** Historically nothing installed it, so the secret layer's very first action was `command not found` — silently, with every job then running credential-less. The private bootstrap installs it now; confirm `op --version` answers before step 5.
+- **Tailscale key expiry, before anything else.** No public inbound TCP means an expired node key is a total lockout with no fallback path. Disable expiry (or join the node tag-owned so it is exempt), then verify access from a second terminal before closing the first connection.
+- **`op` before any secret is read.** Confirm `op --version` before placing the bootstrap environment; secret rendering depends on it.
 - **pin-watch cannot bootstrap itself.** It is steady-state only: it harvests the runtime env off the _running_ container via `docker inspect` and reads nothing from `op`. With no container there is nothing to harvest. The first image build and `docker run` are manual, every time.
-- **A green `/status` row is not proof.** A probe reporting "not configured" and a cron marker written by a killed run both used to read healthy. Verify for the right reason (below).
+- **A green `/status` row is not proof.** Treat `/status` as valid only when the probe is configured and corroborated by a fresh real artifact.
 
 ## What is NOT in any backup
 
@@ -103,7 +101,7 @@ Not "it should be fine". Concretely, in this order:
 1. **Timers.** `systemctl list-timers 'fluncle-*' 'pin-watch*'` — the live count matches what `install-host-timers.sh --dry-run` planned from the repo. A missing timer is a missing sweep, not a rounding error.
 2. **Secrets rendered.** Both env files exist at `0600`, and the sweep env's key count matches the template's. `preflight.ts` reports that count; a short render means `op inject` partially failed.
 3. **One sweep, by hand, before trusting the schedule.** `sudo systemctl start fluncle-<job>.service`, then `journalctl -u fluncle-<job>.service` — expect the sweep's JSON summary line with `ok: true`, and a fresh marker under the cron-output dir.
-4. **`/status` green for the right reason.** A row that is green because its probe is unconfigured is not success. Cross-check a green row against a real artifact — a fresh marker file, a backup object that landed today.
+4. **`/status` green for the right reason.** Cross-check each green row against a fresh marker or backup object.
 5. **The role boundary intact.** An agent-token read returns `{ok:true}` and a publish-class command comes back **403**. That is [`hermes-agent.md` § Verify](../../../docs/agents/hermes-agent.md); the pre-smoke in `pin-watch` runs the same pair, so a rebuilt box that passes it is a box whose credential is correctly scoped.
 6. **The backup loop closed.** Run `preflight.ts` again against the rebuilt box. All seven checks passing is the definition of done, because it means the next rebuild is possible too.
 

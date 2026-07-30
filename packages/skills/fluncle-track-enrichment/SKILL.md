@@ -1,6 +1,6 @@
 ---
 name: fluncle-track-enrichment
-description: Enrich a Fluncle track from audio — analyze the captured full song when it exists (else a 30s preview) for BPM, musical key, and a spectral feature vector, then write them back via the fluncle CLI. Use when given a Fluncle track id or log_id to analyze/enrich, when computing key/BPM for a track, or when running the track enrichment agent (locally or on the Hermes box). The feature vector is internal creative fuel (the vibe-placement model it once fed is retired); sonic similarity now comes from the separate MuQ audio-embedding step (the fluncle-embed cron).
+description: Enrich a Fluncle track from audio — analyze the captured full song when it exists (else a 30s preview) for BPM, musical key, and a spectral feature vector, then write them back via the fluncle CLI. Use when given a Fluncle track id or log_id to analyze/enrich, when computing key/BPM for a track, or when running the track enrichment agent (locally or on the Hermes box). The feature vector is internal creative fuel. Sonic similarity uses the separate MuQ audio-embedding step run by the `fluncle-embed` cron.
 ---
 
 # Fluncle track enrichment agent
@@ -38,7 +38,7 @@ The analysis script (`scripts/analyze-track.ts`) is **self-contained** — zero 
 
    The output: `{ archivePreview, bpm, bpmConfidence, key, keyConfidence, features, previews }`. It resolves **multiple** previews (Deezer + iTunes are often different 30s windows of the song) and keeps the most-confident read per field. The exported `archivePreview` is exactly the preview used for the feature vector; it is an operator-only archive path input for private analysis/model training, not public playback media. Both `bpm` and `key` are `null` when confidence is low — better null than wrong (e.g. a beatless build-up preview, or an atonal track). `features` is the raw spectral vector.
 
-3. **Archive the analysis preview.** ONLY on the preview path — `archivePreview` is absent when you analyzed a full song, and the server rejects an oversized body outright (`preview_too_large`). When it IS present, store that one official 30s preview through the admin API:
+3. **Archive the analysis preview.** When `archivePreview` is present, store that official 30-second preview through the admin API. The server rejects oversized bodies with `preview_too_large`.
 
    ```
    fluncle admin tracks preview <trackId> --file "<archivePreview.path>" --source "<archivePreview.source>" --mime "<archivePreview.mime>"
@@ -58,7 +58,7 @@ The analysis script (`scripts/analyze-track.ts`) is **self-contained** — zero 
 
    - Pass `--bpm` only if the analysis returned a non-null bpm (syncopated/build-up previews can't be measured — better null than a wrong guess).
    - Pass `--key` only if the analysis returned a non-null key.
-   - Always pass `--features` (the JSON vector) — internal creative fuel for the video agent. It once seeded a vibe-placement model, but that is retired: audio can't learn the manual map, so sonic grouping moved to the separate MuQ audio embedding (see "Audio embedding" below). You do NOT place a track on the vibe map.
+   - Always pass `--features` as internal creative fuel for the video agent. Sonic grouping uses the separate MuQ audio embedding; this workflow does not place tracks on the vibe map.
    - Set `--status done`.
 
 That's the whole loop: get → analyze → archive → update.
@@ -66,13 +66,12 @@ That's the whole loop: get → analyze → archive → update.
 ## Rules
 
 - **Never invent data.** If no audio resolves at all (no captured full song and no preview), report it and stop — don't guess BPM/key. Set `--status failed` if you want the operator to see it.
-- **Archive only the analysis preview.** Store one official 30s preview, the one behind `archivePreview`, for private analysis/model training. It is not a playback source.
 - **Key honesty.** Only write a key the analysis was confident about (the script already gates this; respect the `null`).
 - One track per run.
 
 ## Audio embedding (separate, the `fluncle-embed` cron)
 
-The finding's **MuQ audio embedding** — a 1024-d sonic-similarity vector (`embedding_blob`) — is **not** part of this analysis loop. It is computed by its own on-box cron (`fluncle-embed`: torch/MuQ over the **captured full song**, S3-GET from the private `fluncle-source-audio` bucket — never the 30s preview, whose blind "quiet piano" vectors are exactly what the switch to full audio killed; a finding with no captured song is skipped, never preview-embedded), which writes it back through `fluncle admin tracks update <id> --embedding-file`. It powers the `/log` "more like this" row (`list_similar_tracks` cosine-ranks the vectors) and the operator-named **sonic galaxies** — the browse-by-feel lens at `/galaxies`, assigned nightly by the `fluncle-cluster` cron (k-means over this space into `tracks.galaxy_id`), and later the game rendering those galaxies as spatial regions. This is what retired the manual vibe-map tagging: audio can't learn the placement, but it groups the sonically-similar cleanly. The data model + the on-box deploy: `docs/track-lifecycle.md` + `docs/agents/cluster-engine.md` + `docs/agents/hermes/cron/README.md`.
+The finding's MuQ audio embedding is a 1024-dimensional sonic-similarity vector computed by the `fluncle-embed` cron from captured full-song audio. Findings without captured audio are skipped. The cron writes the vector through `fluncle admin tracks update <id> --embedding-file`; it powers `/log` similarity ranking and the sonic galaxies assigned by `fluncle-cluster`. The data model + the on-box deploy: `docs/track-lifecycle.md` + `docs/agents/cluster-engine.md` + `docs/agents/hermes/cron/README.md`.
 
 ## Video render (separate, requires the kit)
 

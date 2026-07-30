@@ -19,13 +19,13 @@ Use this skill to take one of Fluncle's own DJ mixtapes from a recorded set to l
 
 A mixtape is **Fluncle dreaming** — findings consolidated into one long recording, a checkpoint that closes a chapter. It is a first-class object on the Log ID spine but **not a finding**: it carries its own `F`-marked Log ID, never increments `FOUND · N`, and stays off the admin finding board. The full object model — identity, the lifecycle, hosting/licensing, covers, machine-awareness, the per-surface fan-out — lives in **[references/spine-model.md](references/spine-model.md)**. Read it once to understand the object; this file is the repeatable per-mixtape workflow. Canon (PRODUCT.md / DESIGN.md / the `copywriting-fluncle` voice) arbitrates the words and the look.
 
-The internal plumbing is **already built and live** (tables, minting, `/log` mixtape flavor, `/mixtapes`, schema/RSS/llms.txt awareness, the admin editor, the cover endpoint, the `distribute` command). This skill operates it; it does not rebuild it.
+This skill operates the existing mixtape lifecycle and surfaces (tables, minting, `/log` mixtape flavor, `/mixtapes`, schema/RSS/llms.txt awareness, the admin editor, the cover endpoint, and the `distribute` command).
 
 ## One-time setup (per Mac)
 
 Two durable OAuth grants, stored **server-side** so the CLI stays a thin client:
 
-- `fluncle admin auth youtube` — opens Google's consent screen; the refresh token is stored in `youtube_auth`. **At the consent screen pick the `@fluncle` channel (a Brand Account), not a personal Google account** — the wrong identity fails the upload with `youtubeSignupRequired`. The `@fluncle` channel must be phone-verified (done) or uploads over 15 min fail at insert.
+- `fluncle admin auth youtube` — opens Google's consent screen; the refresh token is stored in `youtube_auth`. **At the consent screen pick the `@fluncle` channel (a Brand Account), not a personal Google account** — the wrong identity fails the upload with `youtubeSignupRequired`. The `@fluncle` channel must be phone-verified before uploads longer than 15 minutes.
 - `fluncle admin auth mixcloud` — prints a Mixcloud authorize URL; approve, and the callback exchanges the code into `mixcloud_auth`. The CLI fetches this token just-in-time at upload (only the bytes are CLI-side). Re-run if a later upload reports an invalid token. Secrets live on Cloudflare (`MIXCLOUD_CLIENT_ID/SECRET`; the redirect is derived from the request origin, no var).
 
 For the Rekordbox tracklist step, quit Rekordbox fully before running any script — it holds an exclusive lock on `master.db`. pyrekordbox auto-extracts the SQLCipher key from your Rekordbox install; no separate key step is needed (see §B for the manual fallback).
@@ -49,7 +49,7 @@ The M5 carries the CLI, the operator token, and `ffmpeg` (the upload/extract/dis
    brew install mauricekleine/fluncle/fluncle
    ```
 
-   This installs the standalone binary **with the `admin` commands**. Do **NOT** `npm i -g fluncle` — the npm package is a lightweight public shim **without** the `admin` commands (a real gotcha: `fluncle admin …` simply won't exist). Homebrew is the only install that carries the operator surface.
+   Install via Homebrew; the npm package is a public shim and does not include `admin` commands.
 
 2. **On the 🖥️ M5 — install `ffmpeg`** (audio extraction for distribute):
 
@@ -72,7 +72,7 @@ The M5 carries the CLI, the operator token, and `ffmpeg` (the upload/extract/dis
    # scripts live at packages/skills/fluncle-mixtapes/scripts/
    ```
 
-5. **On the 🎛️ M2 — the Rekordbox key, no setup step.** pyrekordbox **auto-extracts** the `master.db` SQLCipher key when Rekordbox is installed on the Mac; there is nothing to run. (The old `python -m pyrekordbox download-key` command was removed upstream at AlphaTheta's request — do not re-add it.) Sanity-check the auto-extract with Rekordbox quit:
+5. **On the 🎛️ M2 — the Rekordbox key, no setup step.** pyrekordbox **auto-extracts** the `master.db` SQLCipher key when Rekordbox is installed on the Mac; there is nothing to run. Sanity-check the auto-extract with Rekordbox quit:
 
    ```bash
    uv run --with pyrekordbox python -c "from pyrekordbox import Rekordbox6Database; db=Rekordbox6Database(); print('OK', sum(1 for _ in db.get_content()))"
@@ -83,6 +83,8 @@ The M5 carries the CLI, the operator token, and `ffmpeg` (the upload/extract/dis
 ## The per-mixtape runbook
 
 The steps are tagged 🖥️ (M5 — capture/stream + CLI: browser / OBS / masters) or 🎛️ (M2 — Rekordbox / `master.db`) per the two-machine split above.
+
+**Large uploads.** `recordings create --video` and `mixtapes distribute` push multi-GB masters to R2. Run both operator-direct in your own Terminal on the M5. An agent's Bash session throttles sustained multi-GB transfers even with `dangerouslyDisableSandbox` and can drop partway with `socket closed`; `dangerouslyDisableSandbox` covers commits and moderate transfers but does not make a multi-GB upload reliable through the harness (AGENTS.md "Which machine am I on?" — THE LOAD-BEARING RULE).
 
 **The canonical flow at a glance:**
 
@@ -103,7 +105,7 @@ The steps are tagged 🖥️ (M5 — capture/stream + CLI: browser / OBS / maste
 2. Capture the assets: the audio master, the mixtape video, any teaser clips (raw material you don't want to re-shoot — and the Fluncle Studio clip pipeline can cut more later from a **recording**'s set video on R2: the `recordings` table + `mixtape_clips`, `fluncle admin recordings …` + `fluncle admin clips list|cut`, `/admin/studio/<recordingId>` + `/admin/clips`, the `fluncle-studio-clip` cron; see `docs/fluncle-studio.md`).
 3. Archive the raw assets to the operator path (R2), like a finding's analysis archive.
 
-> **The one publish path (RFC plan→recording→mixtape §7 / Wave 3-D).** Every mixtape goes through a recording: upload the set as a recording, promote it (mints the coordinate + stages the set video), then distribute. The clip-first path is:
+> **The publish path.** Every mixtape goes through a recording: upload the set as a recording, promote it (mints the coordinate + stages the set video), then distribute. The clip-first path is:
 >
 > 1. `fluncle admin recordings create --title "…" --video <set>.mov` — creates a coordinate-less recording and stages the set video to its own R2 key.
 > 2. Clip it in the Studio at `/admin/studio/<recordingId>` — author the cue tracklist (add each track, mark it at the playhead) and cut framed 9:16 clips. They land in `/admin/clips` grouped under the recording. Un-promoted, a clip points home to `fluncle.com` (no `fluncle://` coordinate — coordinates are for published mixtapes only).
@@ -113,9 +115,9 @@ The steps are tagged 🖥️ (M5 — capture/stream + CLI: browser / OBS / maste
 
 ### B. Build the plan + tracklist 🖥️ M5 compose · 🎛️ M2 derive cues
 
-Pre-publish authoring is a **PLAN** — a videoless `recordings` row, not a mixtape (draft mixtapes retired; a mixtape is only ever born via `promote_recording`). A plan is just the lined-up findings plus an optional live-session date. Duration is derived from the upload at distribute time, not entered. Build the plan in `/admin/plans` (via `fluncle admin recordings create --plan`, or `kind: "plan"` on `create_recording`); the board's Mixtape cell also pencils a single finding straight into a plan ("Add to a plan").
+Pre-publish authoring is a **PLAN** — a videoless `recordings` row, not a mixtape. A published mixtape is created through `promote_recording`; pre-publish authoring uses a videoless plan recording. A plan is just the lined-up findings plus an optional live-session date. Duration is derived from the upload at distribute time, not entered. Build the plan in `/admin/plans` (via `fluncle admin recordings create --plan`, or `kind: "plan"` on `create_recording`); the board's Mixtape cell also pencils a single finding straight into a plan ("Add to a plan").
 
-**The handle replaces the reserved coordinate.** The plan carries an auto-minted **Galaxy-vocab handle** (e.g. `liquid-nebula-roller`) — the fixed label you name your Beatport playlist, USB folders, and Rekordbox crate with up front. Unlike the old date-derived reserved Log ID, it never drifts; the real `XXX.F.ZZ` coordinate is minted only at promote. The dream note and recorded date live on the PUBLISHED mixtape (the post-promote edit), not on the plan. Composing the plan is a 🖥️ M5 browser step (`/admin/plans`); exporting it to Rekordbox (§B2) and deriving the take's cues (below) are 🎛️ M2 steps.
+A plan carries an auto-minted Galaxy-vocabulary handle for external tools. The `XXX.F.ZZ` coordinate is minted only at promotion. The dream note and recorded date live on the PUBLISHED mixtape (the post-promote edit), not on the plan. Composing the plan is a 🖥️ M5 browser step (`/admin/plans`); exporting it to Rekordbox (§B2) and deriving the take's cues (below) are 🎛️ M2 steps.
 
 **Upload the take and attach it to the plan** 🖥️ M5 (the OBS `.mov` master lives on the M5). After recording, create the take as a recording and point it at its plan:
 
@@ -124,13 +126,13 @@ fluncle admin recordings create --title "…" --video <take>.mov   # → takeRec
 fluncle admin recordings update <takeRecordingId> --parent-id <planId>
 ```
 
-`recordings create --video` pushes a **multi-GB** take to R2 — run it **operator-direct, in your own Terminal on the M5**. An agent's Bash session throttles sustained multi-GB transfers even with `dangerouslyDisableSandbox` and drops partway with `socket closed`; `dangerouslyDisableSandbox` covers commits and moderate transfers but does not make a multi-GB upload reliable through the harness (AGENTS.md "Which machine am I on?" — THE LOAD-BEARING RULE).
+Follow the **Large uploads** invariant above.
 
 The plan (videoless) stays the authoring row; the take is the versioned recording that gets clipped, promoted, and distributed. Attaching links the take's derived cues + clips back to the plan.
 
-**Derive the take's cue tracklist from Rekordbox automatically.** After recording a take, run `rekordbox-derive-cues.py` to read the session history, match each track against the Fluncle catalogue, and write the ordered cue array directly to the take's `recording_cues` via `replace-cues`. This replaces the "feed the pruned list by hand" step entirely.
+**Derive the take's cue tracklist from Rekordbox automatically.** After recording a take, run `rekordbox-derive-cues.py` to read the session history, match each track against the Fluncle catalogue, and write the ordered cue array directly to the take's `recording_cues` via `replace-cues`.
 
-**Rekordbox prerequisite:** quit Rekordbox fully before running any script — it holds an exclusive lock on `master.db`. pyrekordbox **auto-extracts the SQLCipher key from your Rekordbox install** when it opens the database, so there is no separate key step. (`python -m pyrekordbox download-key` was removed upstream at AlphaTheta's request — do not re-add it.) If auto-extraction ever fails, cache the key once in Python: `from pyrekordbox.config import write_db6_key_cache; write_db6_key_cache("<key>")`.
+**Rekordbox prerequisite:** quit Rekordbox fully before running any script — it holds an exclusive lock on `master.db`. pyrekordbox **auto-extracts the SQLCipher key from your Rekordbox install** when it opens the database, so there is no separate key step. If auto-extraction ever fails, cache the key once in Python: `from pyrekordbox.config import write_db6_key_cache; write_db6_key_cache("<key>")`.
 
 ```bash
 # Dry-run: see the proposed cues (matched / unmatched / flagged) without writing anything.
@@ -144,11 +146,11 @@ uv run packages/skills/fluncle-mixtapes/scripts/rekordbox-derive-cues.py --apply
 
 The script reads the Rekordbox session in `TrackNo` order (the reliable DJ-load order) and matches each row to a Fluncle finding by normalized title+artist — the same matcher the key-backfill uses (`_fold` / `_normalize_artists` / `_split_title` / `match_key`). Three buckets: **matched** (exactly 1 finding → `findingId` set), **ambiguous** (>1 candidates → flagged, `findingId=null`), **unmatched** (no candidate → flagged, `findingId=null`). **Consecutive same-identity rows are automatically pruned** (a re-load); non-consecutive repeats are kept but flagged. `startMs` is left absent on every cue — mark each mix-in on the Studio cue rail (`C`/`X`/↑/↓ loop).
 
-The older `rekordbox-tracklist.py` (prints a plain `Artist — Title` list for manual use) is still present and useful for a quick read-only session review; it is not the write path. It also emits each track's full-song **`key`** (Rekordbox's confident whole-song analysis) and **`bpm`** — the ground-truth widening lever the mixability diagnostics consume for historical sets whose findings left `tracks.key` NULL below the DSP floor; re-run it against an older session on the M2 to feed that.
+Use `rekordbox-tracklist.py` for a read-only session review and full-song key/BPM export; it is not the cue write path.
 
-**Planning a NEW set? The dream-weaver proposes an order.** Before the Rekordbox session, `fluncle admin tracks mixable-order <logId…> [--seed <logId>]` (RFC mixability-engine) orders a candidate pool of findings into a _smoothness-optimized_ proposed chain — Held-Karp exact for ≤16, greedy + 2-opt to 64 — and prints an `Artist — Title` tracklist to paste into Rekordbox as advisory input. It's a smooth chain, **not** an energy-shaped set (open → build → peak → comedown), and it **proposes only**: `recordings promote` stays the sole way a mixtape is minted. The operator's board twin is `/admin/mixable-order` (the "Dream-weaver" station).
+**Planning a NEW set? The dream-weaver proposes an order.** Before the Rekordbox session, `fluncle admin tracks mixable-order <logId…> [--seed <logId>]` orders a candidate pool of findings into a _smoothness-optimized_ proposed chain — Held-Karp exact for ≤16, greedy + 2-opt to 64 — and prints an `Artist — Title` tracklist to paste into Rekordbox as advisory input. It's a smooth chain, **not** an energy-shaped set (open → build → peak → comedown), and it **proposes only**: `recordings promote` stays the sole way a mixtape is minted. The operator's board twin is `/admin/mixable-order` (the "Dream-weaver" station).
 
-**After the cue write, attach each unmatched track as a finding** (`fluncle admin tracks publish "<spotifyUrl>"` or the `/admin` add flow) and re-run with `--apply` to fill in the remaining `findingId=null` slots. A finding that isn't in the catalogue yet is never auto-created — stay honest, add it first. Each linked finding gets its own `/log/<id>` breadcrumb in the published mixtape tracklist (the AEO/SEO play; see the spine model).
+**After the cue write, attach each unmatched track as a finding** (`fluncle admin tracks publish "<spotifyUrl>"` or the `/admin` add flow) and re-run with `--apply` to fill in the remaining `findingId=null` slots. A finding that isn't in the catalogue yet is never auto-created. Add the track as a finding before linking it to a cue. Each linked finding gets its own `/log/<id>` breadcrumb in the published mixtape tracklist (the AEO/SEO play; see the spine model).
 
 ### B2. Export a plan to tools (Rekordbox playlist + Beatport + m3u8) 🎛️
 
@@ -185,7 +187,7 @@ In the Studio at `/admin/studio/<takeId>` (browser): mark each mix-in at the pla
 
 ### B4. The Instagram clip drip-feed 🤖 (automated)
 
-Every clip you cut **auto-enters an Instagram queue** and drips out as a Reel — you don't hand-post. Why a clip can go to IG when a finding can't: a clip is cut from a live-mixed _set_, which fingerprints differently from a single copyrighted master, so its own audio survives on Instagram (the audio-survival spike passed). A finding's master would get muted — that stays manual-only (the `fluncle-publish` skill).
+Every clip you cut **auto-enters an Instagram queue** and drips out as a Reel — you don't hand-post. Because platform treatment of live-set audio can change, validate one real Reel before enabling the cadence. A finding's master would get muted — that stays manual-only (the `fluncle-publish` skill).
 
 How it works:
 
@@ -201,11 +203,11 @@ How it works:
   fluncle admin clips list          # each clip's cut status + its drip state
   ```
 
-- **Post-first-batch (operator).** The experiment's one real risk is IG's ongoing behaviour toward the set audio. **Watch the first automated posts survive** before trusting the cadence; if a clip gets muted or struck, hit `drip-pause` and reassess. The kill switch is the response — the design doesn't change. (First a human validates ONE real Reel end-to-end before the cron is enabled — the live push is otherwise unvalidated.)
+- **Post-first-batch (operator).** Before enabling the cron, the operator must validate one Reel end to end. If Instagram mutes or strikes a clip, run `drip-pause` and reassess.
 
 ### C. Promote the recording, then distribute 🖥️ M5 (promote · distribute)
 
-The unified publish path (RFC plan→recording→mixtape §7 / Wave 3-D) is:
+The publish path is:
 
 **1. Promote the recording** 🖥️ M5 — this mints the coordinate AND stages the set video. Do it from the Studio's **Publish as mixtape** button (`/admin/studio/<recordingId>`, browser) or the CLI on the M5:
 
@@ -221,7 +223,7 @@ fluncle admin recordings promote <recordingId>
 fluncle admin mixtapes distribute <idOrLogId> --video <mixtape>.mp4 --audio <master>
 ```
 
-`distribute` pushes **multi-GB** masters to R2 — run it **operator-direct, in your own Terminal on the M5**. An agent's Bash session throttles sustained multi-GB transfers even with `dangerouslyDisableSandbox` and drops partway with `socket closed`; `dangerouslyDisableSandbox` covers commits and moderate transfers but does not make a multi-GB upload reliable through the harness (AGENTS.md "Which machine am I on?" — THE LOAD-BEARING RULE).
+Follow the **Large uploads** invariant above.
 
 `distribute` is **push-only**: it operates on an already-minted (`distributing` or `published`) mixtape and errors when the coordinate hasn't been minted (promote the recording first). The `--audio <master>` must be the **clean mix (Track 1, no mic)** — extract it from the OBS `.mov` first: `ffmpeg -i <recording>.mov -map 0:a:0 -c:a libmp3lame -b:a 320k <master>.mp3` (Track 2 is the isolated mic — see §A). The `--video` can be the raw `.mov` or a clean-audio cut — your call on whether the YouTube video carries your voice.
 
@@ -233,8 +235,6 @@ Omit a flag to target one platform. The **first successful platform link flips i
 Each leg records into `mixtape_social_posts` — the single source of truth for a mixtape's listen links. The public `externalUrls` (mixcloud/youtube/soundcloud) derives from the `published` rows there; there are no `mixtapes.*_url` columns. SoundCloud has no `distribute` leg — set it manually from the admin editor (it too becomes a `mixtape_social_posts` row).
 
 **Set video on `/log`** is automatic via `promote`. Once promoted, the mixtape `/log/<logId>` page shows the set video as the hero (replacing the cover) and it is crawled/indexed (a `<video:video>` sitemap entry + a VideoObject + og:video). No extra flag needed.
-
-> **Retired flags (Wave 3-D):** `distribute --set-video` and the `draft`-to-`distributing` mint that `distribute` used to perform are both retired. The set video is staged by `promote`, and the coordinate is minted there too. There is now one publish path: record → upload as a recording → promote → distribute.
 
 ### D. Make YouTube public 🖥️
 
@@ -248,9 +248,7 @@ The tracklist cues are often refined **after** a set is already live (the initia
 - **CLI**:
 
 ```bash
-# Mark/adjust cues first on the Fluncle Studio cue rail (the `replace_recording_cues`
-# op, or `set_mixtape_cues` for a published set — the old `mixtapes members` draft
-# command and the `update_mixtape_cue` op both retired):
+# Mark or adjust cues in Studio or through the current cue operation, then run `resync`:
 # …then re-sync the derived metadata to the live platforms:
 fluncle admin mixtapes resync <idOrLogId>                    # both platforms it's distributed to
 fluncle admin mixtapes resync <idOrLogId> --youtube          # only YouTube
@@ -280,7 +278,7 @@ Every surface resolves `fluncle://<id>`: feed checkpoint row, `/mixtapes` index,
 
 ## Limits + crash recovery
 
-YouTube `videos.insert` is metered in the **Video Uploads bucket (~100/day)**, 256 GB / 12 h per video — a non-issue at this cadence; Content ID will claim the mix (it stays up, labels monetize). Because the Log ID is committed before upload, a crash between a successful PUT and finalize leaves a live unlisted video with the right coordinate; re-running may create a duplicate unlisted video to delete in YouTube Studio.
+YouTube limits are approximately 100 uploads per day and 256 GB or 12 hours per video; keep each upload within those limits. Content ID will claim the mix (it stays up, labels monetize). Because the Log ID is committed before upload, a crash between a successful PUT and finalize leaves a live unlisted video with the right coordinate; re-running may create a duplicate unlisted video to delete in YouTube Studio.
 
 ## Pointers
 

@@ -4,22 +4,18 @@ The live runtime: Fluncle's journey rendered through the ship's glass while the
 operator mixes. Two local processes — the **glass** (`bun run glass`, the WebGL
 renderer on :4173) and the **bridge** (`bun run bridge`, plan + fingerprint
 identity + supervisor + phone remote on :4180) — bound by `src/contract.ts`.
-Local-only by design (the never-crash rail: no network dependency mid-show). The
-doctrine and architecture originate in the live+longform RFC (shipped #287–#291;
-now in git history).
+Local-only by design (the never-crash rail: no network dependency mid-show).
 
 ## The glass (Unit L)
 
 `bun run glass` bundles the browser client and serves a self-contained page.
-`$FLUNCLE_GLASS_PORT` overrides the default `:4173` (the operator's live instance
-may hold it — tests boot elsewhere). **The glass resolves `/plan` bridge-first:** at
+`$FLUNCLE_GLASS_PORT` overrides the default `:4173`; tests use an alternate port. **The glass resolves `/plan` bridge-first:** at
 boot (and whenever the bridge appears or returns) it asks the bridge's `/plan` on
 `:4180` and serves THAT when it answers — the operator's real, full plan — falling to
 its own committed `src/plan-pointer/tracklist.json` demo fixture only when no bridge
 answers, and absent even a tracklist it runs uncharted-space standalone (the failure
 floor). It narrates which source won (`plan: 17 findings via the bridge` vs `plan: 5
-findings, local fixture — no bridge`) so the boot table can never again show the demo
-while the bridge holds the real set (the first-set debrief bug). `$FLUNCLE_BRIDGE_PORT`
+findings, local fixture — no bridge`). The boot table reports the selected plan source and finding count. `$FLUNCLE_BRIDGE_PORT`
 overrides the `:4180` the glass proxies to (default `BRIDGE_PORT`) — a test rig points
 the glass at a scratch bridge without touching the operator's live `:4180`. The
 standalone demo `tracklist.json` is a deliberate 5-entry stand-in; the bridge's `/plan`
@@ -36,19 +32,12 @@ Module map (`src/glass/`):
   Exhaustively covered by `flash-limiter.test.ts` (3 pass / 4 fail, red
   independence, the 174 BPM = 2.9 Hz boundary).
 - **`scene-extract.ts`** — resolves an archived composition to replay-ready
-  GLSL + classifies its custom uniforms. Now returns `layers[]` (multi-layer
-  composites like 011.9.8I) and classifies velocity pairs (a position uniform +
-  its `…Vel` sibling, e.g. 011.1.3X's `u_glide`/`u_glideVel`) — closing the last
-  two replay gaps to 17/17. Also flags `usesDrop` (a layer reads `u_audioDrop` /
+  GLSL + classifies its custom uniforms. Returns `layers[]` for multi-layer composites and classifies position/velocity uniform pairs. Also flags `usesDrop` (a layer reads `u_audioDrop` /
   drives a drop alias — the marker the drop arc keys off) and parses the archived
   `dropShape` (rise/hold/fall) from the composition's `reactivity` prop. Covered by
   `scene-extract.test.ts`.
 - **`drop-envelope.ts`** — the drop-reveal engine, pure + isomorphic (the sibling
-  of `flash-limiter.ts`/`settle.ts`). Plate-era compositions build toward a reveal
-  driven by `u_audioDrop`, but live that uniform rode a slow energy-over-swell proxy
-  that never crested — the buildup played, the payoff (025.5.5T the warship) never
-  fired. `DropEnvelope` folds three sources into the one drop drive by `max`: the
-  DSP living idle, a **scripted arrival arc** (buried→crest→settle over the scene's
+  of `flash-limiter.ts`/`settle.ts`). `DropEnvelope` drives `u_audioDrop` from the maximum of the DSP signal, a scripted arrival arc, and a live reveal trigger, preserving the authored buildup and payoff in live playback. The **scripted arrival arc** runs buried→crest→settle over the scene's
   span, fired on arrival at / replay of a drop scene — the composition's authored
   dramaturgy, honoring its archived `dropShape` or a canonical ~4s surge / slow
   settle at ~37.5%), and a **live reveal** (a fast ~300ms attack / ~8s release fired
@@ -68,7 +57,7 @@ Module map (`src/glass/`):
   shared by cold boot AND `webglcontextrestored`), `dsp.ts` (live band DSP + the
   40-bin log-mel frame — dual-resolution: the slow/bass/mel signals keep the 4096-FFT
   window while the transient class rides a second 1024-FFT analyser for ~60ms lower
-  onset latency; the operator A/Bs it against the legacy single-4096 path with `l`),
+  onset latency; the `l` key toggles comparison with the single-4096-FFT DSP path),
   `bridge.ts` (the contract client — consumes `ShowState`,
   sends heartbeats + mel + commands, standalone-safe), and `main.ts` (arrivals,
   plate, HUD, keys, the `drop-envelope.ts` arc/reveal wiring, and the RFC §4
@@ -131,32 +120,20 @@ the pointer; the energy dip→surge detector is the **pre-arm hint only** (never
 advances alone). **Manual advance / rewind / goto always win, instantly.** Pure and
 unit-tested.
 
-**Tier-A — full-song references (RFC full-audio, HELD on the operator's M5 re-tune):** the swap is GATED behind `FLUNCLE_FULL_SONG_FINGERPRINT` (`shouldFingerprintFullSong`, default OFF) so merging it is a live-path no-op — only when an operator token is present AND the flag is on ("1"/"true") does `boot()` (`serve.ts`) fingerprint the FULL SONG instead of the 30s preview, pulling each finding's captured master from the private `fluncle-source-audio` bucket through the operator-tier `get_source_audio` endpoint (`fingerprintPlanFullSong` → `fingerprintSourceAudio`, authed with the CLI's stored token), so a DJ mixing a section the preview never contains can still match (the 2 auto-match misses). A token alone never flips it — the operator sets the flag AFTER the M5 re-tune. Any other state (no token, or the default flag-off) fingerprints previews, and either way the never-crash rail holds (any fetch/decode miss → null frames the matcher skips; fetch-at-boot, held in memory, network-free during the show). A full song is ~10× a preview, so `bestOffsetScore` budget-caps its `offsetStep` (`budgetedOffsetStep`: ≤`OFFSET_POSITION_BUDGET` sliding positions per call, `offsetStep` as the floor for short refs) — which also normalizes the score scale across a MIXED full/preview plan (the reality during the capture-backfill and the terminal unmatched tail). The accuracy harness (below) reads `full/<i>.<ext>` and enforces `spurious == 0` as a HARD GATE; the swap ships only once the operator re-anchors `anchors.json` from full audio, recalibrates the skip params (`skipThreshold`/`skipMargin`/`skipSustainMs`) on the mixed config, `test:matcher-accuracy` is green (`spurious == 0`), and then sets `FLUNCLE_FULL_SONG_FINGERPRINT=1` in the show env to flip the live matcher.
+**Full-song references.** Full-song fingerprinting is opt-in through `FLUNCLE_FULL_SONG_FINGERPRINT` and requires an operator token; previews remain the default. On fetch or decode failure, the matcher skips null frames and continues network-free during the show. Before enabling the flag, regenerate `anchors.json` from full audio, calibrate the skip thresholds on the mixed fixture set, and require `test:matcher-accuracy` to report `spurious == 0`. Full-song audio is pulled through the operator-tier `get_source_audio` endpoint (`fingerprintPlanFullSong` → `fingerprintSourceAudio`). `bestOffsetScore` budget-caps full-song scanning with `budgetedOffsetStep` at ≤`OFFSET_POSITION_BUDGET` sliding positions per call and uses `offsetStep` as the floor for short references.
 
 **Fingerprint unit tests** (`fingerprint.test.ts`, in the ordinary `bun test`, no ffmpeg and no network): the s16le chunk-boundary reassembly (`createS16leSink` — a sample's two bytes can land in different ffmpeg stdout chunks) and all four never-crash fetch rails. The bytes → real frames success path is not covered here; that stays the accuracy run's job.
 
-**Accuracy** (`bun run test:matcher-accuracy`, offline replay of the de-risk spike's
-real set — mixtape 019.F.1A, 17 tracks; needs ffmpeg + the spike fixtures via
-`FLUNCLE_ALIGN_FIXTURES=<dir>`, excluded from `bun test`): **12 of 14
-fingerprintable transitions detected, perfect ordering, zero wrong-track /
-out-of-order advances; 8/16 within ±20s of the hook**, the rest firing minutes early
-where the preview's content already plays in the blend. The two tracks whose
-previews never score against the set (a weak/mismatched preview master) fall to the
-manual nudge — the RFC's sanctioned override. Streaming plan-scoped fingerprinting on
-near-identical liquid DnB is at its causal limit here (the spike's cleaner numbers
-came from a batch global + monotonic-DP alignment, not a causal one); the matcher's
-contract is a monotone, never-wrong-track pointer with the nudge as the safety net,
-not a perfect auto-follow. Thresholds are calibrated in the shape-normalized domain —
-re-run the harness after touching `mel.ts` or the gates.
+**Accuracy.** `bun run test:matcher-accuracy` replays the matcher against local fixtures and requires ffmpeg plus `FLUNCLE_ALIGN_FIXTURES=<dir>`; it is excluded from `bun test`. The harness checks monotonic ordering, transition timing, and spurious advances. The runtime contract is a monotone, never-wrong-track pointer with manual nudge for unmatchable previews. Rerun the harness after changing `mel.ts` or matcher gates.
 
 ### RANDOM-VJ MODE (`--plan all`, `vj.ts`)
 
-RANDOM-VJ MODE is a **different job** from the plan-scoped matcher. The plan/matcher path answers "has the PENDING planned finding started yet?" — it needs an ordered tracklist and an identity to recognize. RANDOM-VJ MODE answers a set where the DJ plays **anything, in any order, possibly tracks that aren't in the archive at all**. It still tries to show **THAT finding** when the DJ plays one — the datagram now carries the deck's IDENTITY, resolved on flip — and falls back to a fresh shuffle draw when it can't. Random is the graceful degradation, not the goal: an on-brand visual that **changes on each transition**, drawn from the **whole archive**, never repeating within a set.
+RANDOM-VJ MODE is a **different job** from the plan-scoped matcher. The plan/matcher path answers "has the PENDING planned finding started yet?" — it needs an ordered tracklist and an identity to recognize. RANDOM-VJ MODE answers a set where the DJ plays **anything, in any order, possibly tracks that aren't in the archive at all**. It still tries to show **THAT finding** when the DJ plays one — the datagram carries the live deck's identity, resolved on flip — and falls back to a fresh shuffle draw when it can't. Random is the graceful degradation, not the goal: an on-brand visual that **changes on each transition**, drawn from the **whole archive**, never repeating within a set.
 
 - **The pool** — `bun run bridge --plan all` builds the pool from `buildAllFindingsPlan` (`plan.ts`): the WHOLE archive drained from the public merged feed (`GET /api/tracks`, cursor-paginated — `fetchAllArchiveRows` follows `nextCursor` through `URLSearchParams` so the base64 cursor survives URL-encoding), then enriched down the SAME `props.json`/`composition.tsx` path the ordered plans use, at bounded concurrency (8). The feed rows already carry the member metadata (`logId`/`title`/`artists`/`durationMs`), so there is no per-id round-trip — only `enrich` re-hits `found.fluncle.com`. **Fluncle's own mixtape is excluded** (`isMixtapeCoordinate` — the `F`-galaxy middle char of `NNN.G.CC`; the feed rows include it but the VJ pool is the ~60 findings only, ~55 replayable, the rest riding the default-vehicle morph). It is served over `/plan` exactly like any other plan, so the glass renders it with no changes. VJ mode has no fallback tracklist, so it **fails fast + loud**: a non-OK / thrown feed fetch (`www.fluncle.com` fronts a Cloudflare rule that 403s crawler-ish user-agents), a repeating/runaway cursor (a pagination safety rail), or an empty resolved pool throws, and the bridge exits non-zero rather than boot a visual-less show.
-- **No fingerprinting** — because there is no identity to match, `boot()` (`serve.ts`) returns `frames: null` for every entry, so the matcher never advances on its own (`channels.matcher` reads `off`). **Every other plan ref still fingerprints and matches exactly as before** — VJ mode is the ONE `isAllPlan` branch.
+- **No fingerprinting** — because there is no identity to match, `boot()` (`serve.ts`) returns `frames: null` for every entry, so the matcher never advances on its own (`channels.matcher` reads `off`). Only `isAllPlan` disables fingerprinting; every other plan reference fingerprints and matches.
 - **The director** — a **shuffle-bag** (`createShuffleBag`, pure + seedable): random WITHOUT replacement (every finding shows exactly once before any repeats), reshuffled on exhaust, and never the same finding back-to-back — including across the reshuffle boundary. Seeded per set with `mulberry32(Date.now())`. `take(index)` removes a still-pending index from the current cycle so a finding shown by a **canonical identity match** (below) isn't then re-drawn at random this cycle; the anti-repeat boundary covers a taken index too.
-- **The transition channel — CLOSING THE LOOP** — a `node:dgram` UDP listener bound **only** in VJ mode (`startVjTransitionListener`). The DJ-mixer sender on the other machine fires one datagram per mix transition, now optionally carrying the IDENTITY of the track that just went live (read on the mixing machine by `deckwatch.py`, since the bridge can't OCR a screen on the other Mac):
+- **The transition channel — CLOSING THE LOOP** — a `node:dgram` UDP listener bound **only** in VJ mode (`startVjTransitionListener`). The DJ-mixer sender on the other machine fires one datagram per mix transition, optionally carrying the identity of the track that went live (read on the mixing machine by `deckwatch.py`, since the bridge can't OCR a screen on the other Mac):
 
   ```json
   {
@@ -167,7 +144,7 @@ RANDOM-VJ MODE is a **different job** from the plan-scoped matcher. The plan/mat
   ```
 
   On each **valid** datagram `serve.ts`'s `selectVjIndex` runs **one code path**:
-  - **identity present + resolves** (`resolveDeck` against the pool — a `PlanEntry[]` is structurally a `Finding[]` since it now carries `bpm`/`key`) → `goto(match.index)`: the wall shows **THAT finding**, and the index is `take`n from the bag. The resolve is **on flip** (the bass swap), the ratified fusion timing — reading the deck earlier is fine, swapping earlier is forbidden.
+  - **identity present + resolves** (`resolveDeck` against the pool — a `PlanEntry[]` is structurally a `Finding[]` because it carries `bpm` and `key`) → `goto(match.index)`: the wall shows **THAT finding**, and the index is `take`n from the bag. The resolve is **on flip** (the bass swap), the ratified fusion timing — reading the deck earlier is fine, swapping earlier is forbidden.
   - **no identity, or it resolves to nothing** (OCR noise, or the DJ played a track that simply isn't a finding) → `goto(bag.next())`: a fresh shuffle draw. Random is the graceful degradation, never the WRONG specific finding.
 
   Which path was taken (matched logId + score, or the fallback reason) is logged. Malformed / non-JSON / wrong-`type` / bad-`deck` datagrams are **ignored silently**, and a malformed `identity` degrades to "no identity" without rejecting the transition (the never-crash rail). The port defaults to `VJ_TRANSITION_PORT` (`9000`), overridable via `FLUNCLE_VJ_TRANSITION_PORT` (set `0` for an ephemeral OS-assigned port). It binds on all interfaces so a **LAN/VPN peer** can reach it — **LAN-local by design**, like the rest of the live rig (no auth; keep it off the open internet). Covered by `vj.test.ts` (the bag guarantees incl. `take`, the parser incl. identity variants, a live ephemeral-socket round-trip) and `serve.test.ts` (the `selectVjIndex` match-vs-fallback decision).
@@ -189,4 +166,4 @@ default `VJ_TRANSITION_PORT` = `9000`). A plan HANDLE additionally reads the adm
 env (`FLUNCLE_API_TOKEN` / `FLUNCLE_API_BASE_URL`) or `~/.config/fluncle/.env.production`
 (the CLI's stored credential, read-only).
 
-The plate-era gallery: `FLUNCLE_SHOW_PLAN=src/glass/fixtures/plan-plate-era.json bun src/glass/serve.ts` raises the glass standalone on the first twelve plate-era findings — the lounge-mode demo of the new-era worlds (arrows travel, `v` replays the arrival arc, `f` fires the reveal).
+The plate gallery: `FLUNCLE_SHOW_PLAN=src/glass/fixtures/plan-plate-era.json bun src/glass/serve.ts` runs the first twelve plate-based findings as a standalone lounge-mode demo.

@@ -16,15 +16,15 @@ description: >-
 
 # Fluncle catalogue off-genre pruning pass
 
-Fluncle is a **drum & bass** archive. Its catalogue crawler walks the MusicBrainz graph out from operator-approved seed labels, and historically over-reached: it pulled a hop-1 artist's _entire_ discography regardless of label, so off-genre entities (Bob Marley's reggae, Adele's pop, Miles Davis's jazz) leaked in and earned public pages. The crawler's write-gate now seals new entry (`docs/catalogue-crawler.md`); this skill is the periodic pass that **cleans what already leaked**, safely.
+Fluncle is a **drum & bass** archive. The crawler’s write gate prevents off-boundary catalogue entry. This procedure removes off-genre entities already present in the catalogue.
 
-It is destructive on production, and every automatic classifier we tried over-prunes. So this is a **human-in-the-loop procedure**: the scripts _surface_ candidates and do the mechanical deletes; **you make every genre call**. Read `references/traps.md` before your first run — it is the list of specific false-positives (DJ Marky, S.P.Y, a DJ Marky classic) that a naive rule would have deleted.
+It is destructive on production. Genre rulings require human review: scripts surface candidates and perform confirmed mechanical changes; the operator makes each genre call. Read `references/traps.md` before your first run — it is the list of specific false-positives (DJ Marky, S.P.Y, a DJ Marky classic) that a naive rule would have deleted.
 
 ## Ground rules (non-negotiable)
 
 - **Prod only.** The local DB is a seeded subset and lies about scale. All scripts hit prod via `op` or exported Turso creds.
 - **Dry-run → eyeball → backup → confirm.** Never run a `--confirm` before reading its dry-run and taking a fresh backup.
-- **Keep = a finding OR an enabled-label track.** Anything with a `findings` row is Maurice's real work — untouchable. Do NOT add a "must have a certified finding" gate; findings-free catalogue-only DnB pages are legitimate.
+- **Keep = a finding OR an enabled-label track.** Anything with a `findings` row is a certified finding and is excluded from pruning. Do NOT add a "must have a certified finding" gate; findings-free catalogue-only DnB pages are legitimate.
 - **Classify labels by NAME, not by data heuristics.** Roster-overlap, comp-titles, and "disabled label" are all broken signals (see traps). When you can't identify a label, leave it `undecided`.
 
 ## Setup
@@ -104,9 +104,9 @@ for s in miles-davis bob-marley-the-wailers loxy degs; do
 
 The scan's last section lists non-DnB artists kept alive by a _token_ DnB remix (MusicBrainz bills a remix to the original artist). These are a small, slow-growing tail — handle sporadically, by hand. For each, decide: strip the off-genre back-catalogue but **keep the DnB remix track** (often on a multi-genre disabled label like fabric/StreetBeat — do NOT blanket-delete by label). Or leave it: a page showing only "Song (DnB Producer remix)" is on-brand and useful long-tail SEO. There is no `--confirm` for this step on purpose; it is per-track judgement. See `references/traps.md` § "original-of-remix".
 
-### 7 — Orphaned edges (one-off, from the deletes that came before this rail)
+### 7 — Repair orphaned edges
 
-An **orphaned edge** is a `track_artists` row pointing at a track that no longer exists. Purges done before the transactional pair above left 62 of them across 36 artists (measured 2026-07-26). They render as nothing and count as nothing, but they lie to anything that reads `track_artists` raw. Sweep them up once:
+Run `clean-orphan-edges.ts` when validation finds `track_artists` rows whose tracks no longer exist.
 
 ```bash
 bun run packages/skills/fluncle-catalogue-prune/scripts/clean-orphan-edges.ts            # dry-run: count + per-artist breakdown
@@ -118,8 +118,6 @@ Safe to re-run — once clean it finds nothing. `--apply` prints before/after co
 ## Namesake repair (wrong MusicBrainz label walked under an enabled seed)
 
 **A different failure from everything above.** The pass so far assumes a wrong LABEL RULING: the operator's call on a label was too generous, so disabling it makes its artists purge-eligible. The namesake case is the opposite — **the ruling is right and the identity is wrong.** A seed label enters the frontier as `fluncle:label:<slug>`, a resolver node whose only job is to turn the operator's label NAME into a MusicBrainz label MBID. When two labels share a name, that resolution can pick the other one, and the crawler then walks a label nobody approved as though it were the approved seed.
-
-The case that created this section: **Radar Records** — a Belgian DnB label the operator correctly ruled `enabled`, whose slug resolved to a 1978 UK punk label of the same name. 303 tracks came in under an ENABLED seed, across six seeds affected the same way.
 
 **Why nothing above can fix it.** `purge.ts` needs a `disabled` label behind an artist before it will touch them, and disabling Radar Records would be a lie — the DnB label is genuinely a seed, and disabling it stops the crawl the operator wants. There is no label-level signal that separates the two labels, because at the label level they are the same row. Only a human naming the wrong artists resolves it. See `references/traps.md` § "the namesake class".
 
@@ -152,7 +150,7 @@ bun run packages/skills/fluncle-catalogue-prune/scripts/purge-artists.ts --artis
 - **the labels the deleted tracks sit on**, each with its seed state — expect `[enabled seed]` here. That is the whole point of the tool and the one place in this skill where seeing `enabled` is correct rather than alarming. Anything you did not expect on this list means a named artist also released elsewhere, and the purge is wider than you think;
 - **the tracks that SURVIVE**, with the co-credit keeping each one alive — a track shared with an artist you did not name is never deleted, so the impostor's row disappears while a collaboration stays. If a track you meant to remove is on this list, the co-artist belongs in the list too.
 
-The run **hard-aborts** rather than skipping on: a slug with no `artists` row, a named artist carrying a `findings` track (Maurice's logged work — never a namesake), and any deletable track entangled in a mixtape, save, published post, or frontier edition. A refusal means your list is wrong; fix the list, don't work around it.
+The run **hard-aborts** rather than skipping on: a slug with no `artists` row, a named artist carrying a finding-bearing track, and any deletable track entangled in a mixtape, save, published post, or frontier edition. A refusal means your list is wrong; fix the list, don't work around it.
 
 **5 — Backup, then confirm.** Same backup as § 3 above (`db:pull-prod` into a timestamped copy), then:
 
@@ -175,9 +173,7 @@ Then watch the next crawl tick: the seed should resolve to `mb_label_id` and min
 
 **The case the namesake purge deliberately leaves behind.** `purge-artists.ts` deletes an artist WHOLE, so it spares any artist holding genuine enabled-label tracks — correctly, because deleting them would take a real drum & bass page with them. What survives that rule is the **conflated row**: ONE `artists` row carrying a real DnB act AND an unrelated same-named act whose tracks arrived on the impostor walk. The impostor's tracks still render on the real act's public page.
 
-The case that created this section: **`K`** — the Audio Couture / Subtitles / Breakbeat Science drum & bass act, whose row also held 23 tracks by a Japanese pop act credited `K.` on the avex "Cutting Edge" impostor walk. Same shape on `Luna`, `Rose`, `The Kaleidoscope`, `Danger` and others.
-
-**How a row ends up holding two acts — sealed in code, so this is cleanup, not an ongoing leak.** Three paths write `track_artists` edges and only one checked identity. Measured on prod 2026-07-27 across the six namesake labels: of 225 impostor-side edges, **181** came from the crawl-time link (`linkTracksToArtistEntities`, which joined on `artists.name` alone while holding the credit's MusicBrainz artist id), **29** from slice 0's fold (`fold("K.") === fold("K")` — punctuation collapses), and **15** from the mbid-keyed credit sweep, which refuses homonyms by construction and so wrote only genuine crossovers. Both name-only paths now apply the credit sweep's ladder — mbid match wins, a name may only claim an UNCLAIMED row, and a row carrying a different mbid gets no edge (`apps/web/src/lib/server/artists.ts` § THE HOMONYM SEAL).
+**How a row ends up holding two acts — sealed in code, so this is cleanup, not an ongoing leak.** All name-based edge writers apply the homonym seal: MBID match wins; a name may claim only an unclaimed row; a row with another MBID receives no edge (`apps/web/src/lib/server/artists.ts` § THE HOMONYM SEAL).
 
 ### 1 — Detect (read-only)
 
@@ -228,7 +224,7 @@ bun run …/merge-artist.ts --canonical neon --set-mbid <mb-artist-id>
 
 **No track is ever deleted** — a merge moves credit, so it is reversible from the rollback. It re-points every reference to the duplicate, reconciles identity **canonical-wins** (an EMPTY canonical slot is filled from the duplicate), records the duplicate's name + slug as a **confirmed operator alias** so the merged-away slug can never be re-minted, moves the maintained hub counts by measured delta, and deletes the duplicate row. It mirrors `mergeLabel` (`apps/web/src/lib/server/labels.ts`) statement for statement.
 
-**Pick the survivor by SLUG, not by row richness.** The merge re-points _all_ edges either way, so the survivor holds the union regardless of direction — "the richer row" decides nothing. The un-salted slug is the better public URL and the one property a merge cannot fix afterwards; identity is one `--set-mbid` away.
+**Choose the survivor by slug:** prefer the unsalted public URL, then use `--set-mbid` to repair identity when needed.
 
 **`--drop-duplicate-socials` when the two rows' MBIDs disagree.** MB-sourced channels belong to the MBID that sourced them, so a duplicate wearing a different MBID carries a _different act's_ links — moving them puts a stranger's SoundCloud in the survivor's public `sameAs`. The dry-run prints every social and warns when the MBIDs differ.
 
@@ -247,7 +243,7 @@ bun run …/restore-from-rollback.ts --rollback "$PRUNE_OUT_DIR/edgeless-rollbac
 
 The undo every destructive tool here has always promised. It re-inserts albums → artists → tracks → `track_artists`, each `insert or ignore`, so a row already live is never clobbered and a second run changes nothing. Use it for the narrow case that actually comes up: a purge was RIGHT about a label and WRONG about a handful of rows under it.
 
-**A requested id the file does not hold is a hard abort** — that means the wrong rollback was named, and a silent partial restore is the worse outcome. Schema drift is handled: each insert uses the intersection of the snapshot's columns and the live table's (`pragma table_info`), so a column added since takes its default and a dropped one is reported rather than throwing.
+**A missing requested ID hard-aborts because the rollback does not contain the complete requested set.** Schema drift is handled: each insert uses the intersection of the snapshot's columns and the live table's (`pragma table_info`), so a column added since takes its default and a dropped one is reported rather than throwing.
 
 Deliberately NOT restored: `cost_events` (a ledger of spend that already happened — re-inserting double-counts it), and the hub counts (they lag exactly as after a purge; `reconcile_hub_counts` recomputes from truth within a day).
 

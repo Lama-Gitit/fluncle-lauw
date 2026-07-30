@@ -12,7 +12,7 @@ Reach for it on substantial, multi-faceted, or hand-off work. Skip it for trivia
 
 ## Why this shape
 
-A single-pass plan reflects one mind's blind spots. The pipeline buys three things a solo draft can't: **coverage** (independent researchers sweep angles you'd serialize and tire of), **confidence** (a taste lens and adversarial reviewers catch the over-engineering, the forced couplings, and the _factual errors_ in the draft before they reach a builder), and **a real definition of done** (the completeness standard stops the plan from quietly deferring the hard 20%). The reviewers routinely find load-bearing mistakes the author was too close to see — that's the point, so make them adversarial, not polite.
+Independent researchers provide coverage, a taste pass and adversarial review test the draft's assumptions and factual claims, and the completeness standard supplies a concrete definition of done.
 
 ## The pipeline
 
@@ -24,14 +24,14 @@ State the single outcome in a sentence. Split it into **distinct, non-overlappin
 
 Fan out one read-only sub-agent per thread (the Agent tool, run in the background so they go in parallel). Every researcher must ground findings in **both**:
 
-- **the codebase** — read the real files, name paths, verify what exists today (don't theorize about code you can read), and
+- **the codebase** — read the relevant files, name paths, and verify the current implementation, and
 - **current external practice** — Context7 for any library/framework/API docs, and WebSearch **dated to the current month/year** for fast-moving topics (SEO, model behavior, platform defaults). Cite sources.
 
 Tell each agent to return a **structured findings report** (its final message is the data, not a human-facing note). See `references/agent-prompts.md` for the research-thread scaffold.
 
 ### Phase 3 — Converge (the draft)
 
-Synthesize all findings into a draft RFC using the structure in `references/rfc-template.md`. Don't just concatenate the reports — **hunt for the unifying simplification**: the one framing or shared primitive that makes the separate threads fall into place (it's usually the most valuable thing the RFC produces). Where findings conflict, resolve them and say why. Write the draft to `docs/<topic>-rfc.md` with `Status: Draft`.
+Synthesize all findings into a draft RFC using the structure in `references/rfc-template.md`. Synthesize the reports around the unifying simplification: the framing or shared primitive that makes the separate threads fall into place. Where findings conflict, resolve them and say why. Write the draft to `docs/<topic>-rfc.md` with `Status: Draft`.
 
 ### Phase 4 — Taste pass
 
@@ -39,7 +39,7 @@ Run the **/taste** skill on the draft. Aim it at the real questions: is the core
 
 ### Phase 5 — Adversarial review panel
 
-Spin up **3–4 sub-agents in distinct critical roles** — pick the roles the work actually needs (e.g. staff engineer, design/brand, a domain specialist such as SEO/GEO or security, product/scope). Prompt each to **refute, not approve**: find what breaks, what's underspecified, what's factually wrong in the draft, and what should decompose. Require them to **ground in the code and verify claims live** (curl the endpoint, run the build, read the lockfile) rather than trust the draft. See `references/agent-prompts.md` for the reviewer scaffold. Expect them to catch real errors — that's success, not failure.
+Spin up **3–4 sub-agents in distinct critical roles** — pick the roles the work actually needs (e.g. staff engineer, design/brand, a domain specialist such as SEO/GEO or security, product/scope). Prompt each to **refute, not approve**: find what breaks, what's underspecified, what's factually wrong in the draft, and what should decompose. Require code-grounded, live verification of claims by curling endpoints, running builds, and reading the lockfile. See `references/agent-prompts.md` for the reviewer scaffold. Apply every verified error as a factual correction to the final RFC.
 
 ### Phase 6 — Finalize
 
@@ -54,7 +54,7 @@ Boil the ocean: **do the whole thing, do it right, with tests and documentation,
 - **The only sanctioned "not now"** is a genuine external-dependency chain (B truly needs A first) or an outcome outside our control (e.g. whether a third party cites you) — and those are stated as **honest scoping, not excuses**. Reframe every "defer / optional / table for later / good enough" toward the complete solve unless it's one of those.
 - **Tie off dangling threads** the work surfaces — if a related gap is in reach, close it as part of the delivery.
 
-This standard is the same one in the operator's working preferences; treat it as the house style for any plan this skill produces.
+Apply this completeness standard to every plan this skill produces.
 
 ## Scale to the task
 
@@ -62,4 +62,4 @@ Match the machinery to the size. A focused two-surface change: 2–3 research th
 
 ## Output
 
-The final RFC lives at `docs/<topic>-rfc.md` (in this repo, `docs/` is non-canonical planning — see AGENTS.md). Use the structure in `references/rfc-template.md`. The deliverable of a run is the **final, reviewed, completeness-held RFC** — a real handoff — not a draft and not a verbal summary. Relay the headline reframes and the open decisions to the user; the document carries the rest.
+The final RFC lives at `docs/<topic>-rfc.md` (in this repo, `docs/` is non-canonical planning — see AGENTS.md). Use the structure in `references/rfc-template.md`. The deliverable is a final, reviewed RFC suitable for implementation handoff. Relay the headline reframes and the open decisions to the user; the document carries the rest.

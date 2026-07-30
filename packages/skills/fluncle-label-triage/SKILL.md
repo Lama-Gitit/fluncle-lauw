@@ -5,7 +5,7 @@ description: Run a label triage pass — research Fluncle's undecided crawl-seed
 
 # Fluncle label triage — rule the undecided crawl seeds
 
-The catalogue crawler stores a track only when its release's label is `enabled` (the STORAGE GATE, docs/catalogue-crawler.md); a newly discovered label lands `undecided` and its releases are walked but written as nothing. So the undecided pile is the throttle on catalogue growth — and it refills itself: **every batch of enables opens new walks that mint the next batch of discoveries within hours** (measured 2026-07-26/27: four rounds, 370 labels ruled, each round's enables surfacing the next round's pile). This skill is the repeatable pass: pull the pile, research every label with real evidence, present three buckets, apply what the operator ratifies.
+The catalogue crawler stores a track only when its release's label is `enabled` (the STORAGE GATE, docs/catalogue-crawler.md); a newly discovered label lands `undecided` and its releases are walked but written as nothing. So the undecided pile is the throttle on catalogue growth — and it refills itself: **every batch of enables opens new walks that mint the next batch of discoveries within hours**. This skill is the repeatable pass: pull the pile, research every label with real evidence, present three buckets, apply what the operator ratifies.
 
 The ruling itself is an OPERATOR act (`update_label` is operator-tier — crawl scope is editorial control). The skill's job is to make each ruling a one-glance decision, never to make it.
 
@@ -38,10 +38,10 @@ Workflow({ scriptPath: "<skill>/scripts/triage-workflow.js",
 
 The script already guards the harness's stringified-`args` delivery (a workflow that returns instantly with zero agents IS that trap) and embeds the full research brief. The method the brief enforces, and why:
 
-- **Calibrate to the operator's live rulings, not a genre notion.** Agents read both calibration lists first. The boundary has a specific learned shape: majors, subsidiaries, distributors and aggregators are OUT even when they carry DnB; **DnB-specific media brands are IN** (Drum&BassArena, UKF enabled; DJ Magazine disabled) — ratified 2026-07-26; genre-adjacent scenes (dubstep, grime, UKG, jungle-adjacent electronica) are OUT.
+- **Calibrate to the operator's live rulings, not a genre notion.** Agents read both calibration lists first. The boundary has a specific learned shape: majors, subsidiaries, distributors and aggregators are OUT even when they carry DnB; **DnB-specific media brands are IN** (Drum&BassArena, UKF enabled; DJ Magazine disabled); genre-adjacent scenes (dubstep, grime, UKG, jungle-adjacent electronica) are OUT.
 - **MusicBrainz artists are the genre signal; MB `tags`/`genres` are usually EMPTY** — don't rely on them. Release credits (25 releases with artist-credits) decide most labels; the Discogs url-rel from the MB label settles the rest; firecrawl/web search only for what's still open. MB pacing: 1 req/s with a real User-Agent, or 403s.
-- **`unclear` is an honest verdict**, not a failure — mixed-genre with minority DnB, or too small to call. The operator reviews those by hand; a confident wrong "dnb" re-pollutes what the prune pass cleaned.
-- **Flag MB entity CONFLATION instead of ruling through it.** A label whose MBID carries clearly-foreign releases (the "Gain" case: a UK DnB label's MBID polluted with a Swedish rock label's catalogue) must come back `unclear` with the conflation named — enabling crawls BY MBID, so an enable imports the foreign catalogue. The fix is an upstream MB entity split, then an easy enable.
+- Return `unclear` for mixed-genre labels, minority-DnB catalogues, or evidence too sparse to support a ruling; the operator reviews these manually.
+- Return `unclear` and name the conflation when one MBID contains releases from distinct labels; enabling crawls by MBID, so split the upstream entity before enabling.
 - On a partial failure (an agent dies mid-run), **resume with `resumeFromRunId`** — completed batches replay from cache, only the dead slice re-runs.
 
 ### 3 · Present for ratification
@@ -59,12 +59,12 @@ Reads the staged verdicts (`label-triage.json`: `dnb` → enabled, `not_dnb` →
 
 ### 5 · Close the loop
 
-Re-count the pile after applying — the enables just opened new walks, so expect fresh mints within the hour. Report the new-arrivals count and offer the next round rather than silently ending; on a heavy day the rounds chain (round sizes measured: 242 → 58 → 77 → 14 in ~30h).
+Re-count after applying and report newly minted undecided labels; offer another pass when the queue has refilled.
 
 ## Verification quality bar (the pass earns trust once, keeps it always)
 
 - A wrong "enable" stores off-genre catalogue and mints public pages; a wrong "disable" silently loses good music. When a verdict matters and is checkable — an ISRC in hand, a duration — spot-check via free oracles (Deezer's no-auth API) before presenting it as fact.
-- The agents can push back on the BRIEF: the media-brands rule was discovered when an agent showed the brief contradicted the operator's own rulings. Calibration lists beat category rules; keep them live.
+- Agents may challenge the brief with evidence. Live calibration lists override category rules.
 
 ## Where the concrete detail lives
 
