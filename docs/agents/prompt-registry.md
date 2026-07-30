@@ -4,15 +4,15 @@ Every prompt Fluncle feeds a model at runtime lives in the **registry** — a ba
 
 ## Why
 
-A prompt is the most iterative object in the system and it had the heaviest change loop: a code edit, a review, a deploy, and — for the five that run on the box — a rebake of the image. That loop is wrong for a thing whose whole nature is _reword it, watch what it does, reword it again_, and it is the loop we will run hardest when we go after homogenisation (the neighbour block in the finding-note prompt is the front line, and it is going to get tuned a lot).
+The registry supports rapid prompt iteration: an operator edit becomes active on the next tick without a code change, deploy, or image rebuild.
 
 ## A prompt IS code, so the safety rails are the feature
 
-A bad live edit **silently degrades every artifact it touches** until a human notices. Nothing about this feature is safe unless four things are true, so all four are load-bearing:
+Live prompt editing requires four safeguards:
 
 1. **Versioning, a visible diff, and a one-action rollback.** The operator must be able to see what changed, when, and put it back.
 2. **A sweep can never break because a prompt row is missing.** The repo keeps the default; the database only ever _overrides_ it. Every failure falls back and logs.
-3. **The voice gates stay.** An editable prompt is not a licence to bypass the gate that keeps Fluncle sounding like Fluncle. The Worker re-scans every authored artifact exactly as it did before — the gates never read a prompt and cannot be edited from `/admin`.
+3. **The voice gates stay.** The Worker re-scans every authored artifact. Voice gates do not read prompt content and cannot be edited from `/admin`.
 4. **Provenance on the artifact.** Every artifact records the prompt version that drafted it, so _"the notes got worse last week"_ is a question with an answer.
 
 ## The three tiers, and the version each reports
@@ -44,10 +44,10 @@ So: `prompt_versions`, **one row per edit, append-only**. A row is never mutated
 
 ## The architecture is decided by the box
 
-**The box runs a pinned CLI release and a baked script image.** A new `fluncle` verb does not exist on the box until a release _and_ a pin bump — which is the exact deploy loop this feature exists to abolish. So a sweep reaches its prompt the only way it can reach anything new: **over the API, with the `agent`-scoped token it already holds.**
+Box sweeps fetch prompts over the API with their existing agent-scoped token, independently of pinned CLI and image releases.
 
 ```
-  the operator                     the Worker                        the box (rave-02)
+  the operator                     the Worker                        the box
  ┌────────────────┐          ┌───────────────────────┐          ┌──────────────────────┐
  │ /admin/prompts │─POST────▶│ update_prompt         │          │ note-sweep.ts        │
  │ fluncle admin  │  (op)    │   → prompt_versions   │          │ observe-sweep.ts     │
@@ -65,13 +65,11 @@ So: `prompt_versions`, **one row per edit, append-only**. A row is never mutated
 - **`get_prompt`** (`GET /admin/prompts/{slug}`) is **AGENT tier** — the `record_cost` / `record_health` precedent. Lean by design: the resolved body and the version to stamp. It cannot 404 on a registered slug, and it cannot fail: a slug with no override resolves to the repo's baked default at version 0.
 - **`list_prompts`** (`GET /admin/prompts`) and **`update_prompt`** (`POST /admin/prompts/{slug}`) are **OPERATOR tier**. An agent may read the prompt it runs; it may never rewrite it. Editing what Fluncle _says_ is publish-class.
 
-The box side is `docs/agents/hermes/scripts/prompt-fetch.ts` — the shared best-effort reader, modelled on `cost-emit.ts` (the precedent for a box script that talks to the API directly). It **cannot throw**: no token, a non-2xx, a network error, a timeout, an empty body — every path returns `null`, and `null` means one thing to every caller: **fall back to the builder baked into the sweep and author exactly as it did before this feature existed.**
-
-That inlined builder is not dead code. It is the floor, and it is what makes "the prompt store is down" a boring event instead of a stopped pipeline.
+The shared reader returns `null` for retrieval failures. Every caller interprets `null` by using its inlined fallback builder, keeping the pipeline available.
 
 ## The template
 
-Two constructs, and nothing else — because a prompt template is edited by a human at 1am and every feature is a way to break a sweep.
+Templates support two constructs to keep rendering total and predictable:
 
 ```
 {{name}}              the variable's value, or "" when it is absent/empty
@@ -80,7 +78,7 @@ Two constructs, and nothing else — because a prompt template is edited by a hu
 
 There are **no loops** (a list arrives pre-joined as one string variable) and **no `else`** (a two-armed branch is expressed as two flags — see `contextNote` / `noContextNote`). The renderer is **total**: every input renders to a string, an unknown variable renders empty, and nothing throws. An operator's typo in the editor must never be able to stop a sweep.
 
-The whole prose is in the template, deliberately. A template that only exposed the data slots would let the operator change the facts and nothing that matters.
+The template contains the full prose so the operator can tune both instructions and data slots.
 
 ## The inventory
 
@@ -140,4 +138,4 @@ fluncle admin prompts reset note_author          # put the repo's baked default 
 
 The same loop lives at **`/admin/prompts`**: the list, the editor with a live diff against the running body, the full history with a per-version diff, a one-action **Roll back** behind a confirm that names what it does, and **Reset to the repo default** demoted behind the `⋮`.
 
-**Always write the note.** It is what makes the history readable a month later — and a month later is exactly when you will be asking.
+Always supply the change note; it preserves the rationale in prompt-version history.

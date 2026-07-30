@@ -8,7 +8,7 @@ The end-to-end doctrine for Fluncle's per-finding VIDEO render pipeline: how a q
 
 `fluncle-render` is unlike every other Hermes sweep. The other sweeps run their whole job inside the Hermes orchestrator box; this one is a **conductor**. The Hermes box carries no Remotion toolchain, and a render is a ~75–90 minute CPU hog that would both blow the runner's ~120s kill and starve the 5-minute sweeps it shares the box with — so the conductor wakes a separate **scale-to-zero box.ascii render box (rave-03)**, triggers the `@fluncle-video` render of exactly one queued finding _there_, and parks the box when the render finishes.
 
-**There is no GPU anywhere in this pipeline, and that is deliberate.** The conductor pins `FLUNCLE_GL=swangle` — software GL — into every render's environment, so frames rasterize on the CPU. That is what makes the render box disposable: any box.ascii box can run it, a purge is a ~5-minute reprovision from `main`, and there is no accelerator to match or driver to pin. The cost is wall-clock (hence the ~75–90 minute renders and the detached, two-state design below), which the hourly cadence absorbs. Older revisions of this doc, `AGENTS.md`, and the operator skill all called rave-03 a "GPU render box"; that was never true of the render path and the label is retired. The render box renders + **ships to R2 / the website** (it sets `video_url`); it **never posts to social** — enforced twice over: the render-queue prompt's hard rail says don't, AND the server-side role boundary makes it impossible (the box carries only the `agent`-scoped token, and every publish-class route is operator-tier → 403, so a misbehaving render agent _cannot_ post).
+**There is no GPU anywhere in this pipeline, and that is deliberate.** The conductor pins `FLUNCLE_GL=swangle` — software GL — into every render's environment, so frames rasterize on the CPU. That is what makes the render box disposable: any box.ascii box can run it, a purge is a ~5-minute reprovision from `main`, and there is no accelerator to match or driver to pin. The cost is wall-clock (hence the ~75–90 minute renders and the detached, two-state design below), which the hourly cadence absorbs. The render box ships to R2/the website. Its agent-scoped token cannot access operator-tier social-publishing routes.
 
 The conductor is a rave-02 HOST systemd timer (`fluncle-render.timer`/`.service`, every 60m — installed by [`hermes/install-host-timers.sh`](./hermes/), unit dir [`hermes/render-timer/`](./hermes/render-timer/)) that runs [`hermes/scripts/render-conductor.sh`](./hermes/scripts/render-conductor.sh). The script bakes into the Hermes image at `/opt/hermes-scripts` and auto-redeploys on merge to `main` via the on-box `pin-watch` self-deploy timer (`pin-watch` is the one host unit off the `fluncle-*` naming pattern). Its two companion scripts: [`provision-rave-03.sh`](./hermes/scripts/provision-rave-03.sh) reproduces the render box from clean `main`, and [`render-detached.sh`](./hermes/scripts/render-detached.sh) runs on the render box.
 
@@ -21,7 +21,7 @@ A swangle (software-GL) render runs ~85 min, but the Hermes `--no-agent` runner 
 
 **Single-flight is the hard requirement — never two renders at once.** The STATE enforces it (only `idle` starts a render; a `rendering` tick only polls), and an atomic `mkdir` lock is a second guard so two ticks never race the state file (with a stale-lock breaker for a tick the ~120s runner killed mid-hold — `flock` is deliberately avoided as non-portable). Because a render (~85m) outlasts the hourly tick, the `rendering` no-op branch fires every cycle: it is the primary safety, exercised continuously, not a rare net.
 
-**The force-park cap is `MAX_RENDER=12600s` (3.5h).** Plate-lane authoring runs ~2h+; the earlier 2.5h cap killed nearly-done renders, so it was raised to 3.5h. A render past the cap is treated as stuck: the box is force-parked and the finding takes a poison-ledger failure.
+**The force-park cap is `MAX_RENDER=12600s` (3.5h).** Plate-lane authoring can exceed two hours, so `MAX_RENDER=12600s` allows 3.5 hours before treating a render as stuck. A render past the cap is force-parked and the finding takes a poison-ledger failure.
 
 **The done-marker freshness guard.** The render box's home persists across stop/resume snapshots, so a done-marker from a PREVIOUS render can outlive it. `render-detached.sh` removes the marker before forking — but only if its trigger actually ran; a wedged box silently no-ops the trigger and leaves the OLD marker in place, which a bare `test -f` would misread as "finished" and chain to the same never-shipped finding forever. So the conductor trusts a marker only when its finish timestamp (`@ <iso>`) is at/after this render's start (minus a clock-skew grace). A stale/undated marker is treated as still-in-flight and the stuck-guard force-parks it, rather than a false "finished".
 
@@ -29,27 +29,27 @@ A swangle (software-GL) render runs ~85 min, but the Hermes `--no-agent` runner 
 
 The pick reads a **window** of the queue (`admin tracks queue --limit 25 --json`, oldest-first), not just the head — so a poisoned head can be stepped over without starving the findings behind it. The pick is the oldest finding that is NOT currently poisoned; 25 is far past any realistic simultaneous-poison count.
 
-**The poison ledger** (a tab-separated `logId  count  lastFailEpoch` file, awk-manipulated write-to-temp-then-mv) is the head-of-line-block guard. After `POISON_THRESHOLD` (default 3) consecutive failures a finding is skipped for `POISON_TTL` (default 6h), then allowed one retry — so a TRANSIENT box.ascii wobble self-heals while an item-specific defect re-poisons. A clean render clears that finding's ledger. This exists because a single finding that failed hourly for ~9h once starved five findings behind it (2026-07-16).
+**The poison ledger** (a tab-separated `logId  count  lastFailEpoch` file, awk-manipulated write-to-temp-then-mv) is the head-of-line-block guard. After `POISON_THRESHOLD` (default 3) consecutive failures a finding is skipped for `POISON_TTL` (default 6h), then allowed one retry — so a TRANSIENT box.ascii wobble self-heals while an item-specific defect re-poisons. A clean render clears that finding's ledger. The poison ledger prevents one repeatedly failing finding from blocking later queue entries.
 
-**A clean EXIT is not proof — the video has to actually land.** A render can exit `0` without shipping: the `claude -p` agent gets cut off mid-render by a usage limit, or it renders a video the quality gates reject and withholds it. Treating that EXIT=0 as success clears the poison ledger and re-picks the SAME finding forever (the 2026-07-17 loop: 047.8.6J, then 047.6.6P, each spent hours false-succeeding). So the conductor confirms the finding carries a shipped `videoUrl` before clearing the ledger; a no-video EXIT=0 counts as a failure (false-success detection). A non-zero exit (e.g. the ~13s stale-version crash) counts directly. The ledger read is best-effort: any API/parse hiccup assumes shipped, so a transient read glitch never wrongly poisons a good render.
+**A clean EXIT is not proof — the video has to actually land.** An `EXIT=0` is successful only when the finding has a shipped `videoUrl`; otherwise it counts as a false-success failure. A non-zero exit (e.g. the ~13s stale-version crash) counts directly. The ledger read is best-effort: any API/parse hiccup assumes shipped, so a transient read glitch never wrongly poisons a good render.
 
 **The STALL WARNING.** One failure ahead of the poison alert — at `POISON_THRESHOLD - 1` consecutive clean-exit-no-video runs — the conductor fires a Discord ping. Two consecutive clean exits with no video landing is the silent-waste signature (a whole render's tokens burned twice with nothing shipped), so the operator is paged an hour before the poison threshold rather than after a third burn.
 
-**The log-id coherence contract (poison ↔ queue).** The render agent must film the SAME finding the conductor accounts for. The conductor stamps the assigned finding as `FLUNCLE_RENDER_LOG_ID` in the injected box env, and the render-queue prompt treats that as THE pick (its `videoUrl` guard keeps re-runs safe). Before this, the agent re-read the queue itself and could re-pick a head the conductor had just poison-skipped — the fail counter then bumped an innocent finding while the offender burned tokens uncounted (2026-07-19: 049.4.4G took fail #2 for 049.7.6B's renders). The stamp closes that gap: the conductor's accounting and the agent's work name the same finding.
+**The log-id coherence contract (poison ↔ queue).** The render agent must film the SAME finding the conductor accounts for. The conductor stamps the assigned finding as `FLUNCLE_RENDER_LOG_ID` in the injected box env, and the render-queue prompt treats that as THE pick (its `videoUrl` guard keeps re-runs safe). The stamp closes that gap: the conductor's accounting and the agent's work name the same finding.
 
 ## The diversity-axes injection
 
 Homogenisation is designed out UP FRONT, not coached mid-flight (prescriptive coaching increases convergence rather than fixing it). Before triggering the render the conductor pipes the vehicles ledger (`admin tracks vehicles --json`) through [`hermes/scripts/assign-video-axes.ts`](./hermes/scripts/assign-video-axes.ts), which emits `FLUNCLE_VIDEO_*` env lines appended to the box env, so the render agent's creativity lives inside a fixed cell (vehicle name, shader concept, motion, composition stay free):
 
 - `FLUNCLE_VIDEO_GRAIN` — the grain family, chosen least-recently-used and excluding the last three renders' grains.
-- `FLUNCLE_VIDEO_REGISTER` — **hard-pinned `representational` since 2026-07-20**. Representational is a PREREQUISITE, not a quota: the TikTok read is unambiguous (plate-lane pieces with real shapes/figures/artifacts consistently outperform; abstract underperforms), so every render stages a presence. Diversity now lives entirely in the grain family, the palette-avoid directive, the plate subject-kind rotation, and the vehicle — the axes that vary WITHIN representational.
+- `FLUNCLE_VIDEO_REGISTER` is pinned to `representational`; diversity comes from grain, palette avoidance, subject-kind rotation, and vehicle.
 - `FLUNCLE_VIDEO_PALETTE_AVOID` — an optional NEGATIVE directive ("<X> is spent — swing away") derived from the recent window's worn palette bucket or the known amber/halftone basin; absent when nothing is clearly worn.
 
 The assigner is **fail-open by contract**: any hiccup (malformed ledger, a missing bin) prints nothing and the render falls back to free-choice behaviour — an axis assign NEVER blocks a render.
 
 ## The headless `claude -p` trap (and the rails)
 
-**Doctrine: EVERY box `claude -p` invocation sets `CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1`.** Headless mode kills backgrounded Bash tasks ~5s after the final result (documented Claude Code behaviour: code.claude.com/docs/en/env-vars.md). A render agent that backgrounds the encode and ends its turn "waiting for the notification" dies unshipped with EXIT=0 — the 2026-07-19 dead-render class. The whole render must fit in ONE blocking Bash call.
+**Doctrine: EVERY box `claude -p` invocation sets `CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1`.** Headless mode kills backgrounded Bash tasks ~5s after the final result (documented Claude Code behaviour: code.claude.com/docs/en/env-vars.md). A backgrounded encode can be terminated after the final agent result and leave the run unshipped with `EXIT=0`. The whole render must fit in ONE blocking Bash call.
 
 `render-detached.sh` sets the rails behind that doctrine for the render:
 
@@ -84,30 +84,26 @@ The conductor already condemns a box that fails to launch a render (it deletes t
 
 ### The restoring window: `box resume` returns before the box can answer
 
-`box resume` returns success **immediately**, and the box then spends a few seconds `RESTORING` — during which every call against it fails with `{"code":"box_restoring","error":"box restoring (500)","status":500}`. Measured 2026-07-27 as a ~6 second burst that swallowed the whole wake sequence: the freshen ssh, both scp refreshes, and the render trigger. The trigger's launch-line check is the wedge detector, so a healthy box that was merely still coming up read as **wedged** and was condemned — three ticks in a row (17:42Z, 19:44Z, 22:46Z), each costing the hourly slot plus a full reprovision (fresh clone + toolchain install).
-
-`box_restoring` is therefore **retry, never wedge**. `await_box_ready` gates the first contact after a resume: a bounded poll of a trivial `box ssh <id> true` — the same verb the freshen needs next, so answering it _is_ the readiness that matters, and no verb is invented against a pre-1.0 channel-tracking CLI. It retries only while the output carries `box_restoring`, logs `box <id> restoring — waiting (Ns elapsed)` each pass and `box <id> ready after Ns` when the box comes back, and is bounded by wall clock (`BOX_READY_TIMEOUT`, default 75s at `BOX_READY_INTERVAL` 5s) so probe latency counts and the tick stays well inside the unit's `TimeoutStartSec=180`. A genuine timeout or a different error falls straight through to the old behaviour — the freshen is best-effort and the trigger's launch-line check still condemns — so the gate buys time for a slow box without ever excusing a dead one. `render-conductor.test.ts` drives all three cases (restores-then-answers, never-answers, answers-immediately) through the real script against a stubbed `box`.
+`box resume` may return while the box is still `RESTORING`. Poll `box ssh <id> true` until `BOX_READY_TIMEOUT`; allow other errors and timeouts to proceed to the launch-line check. `await_box_ready` retries only while the output carries `box_restoring`, logs `box <id> restoring — waiting (Ns elapsed)` each pass and `box <id> ready after Ns` when the box comes back, and is bounded by wall clock (`BOX_READY_TIMEOUT`, default 75s at `BOX_READY_INTERVAL` 5s) so probe latency counts and the tick stays well inside the unit's `TimeoutStartSec=180`. `render-conductor.test.ts` drives all three cases (restores-then-answers, never-answers, answers-immediately) through the real script against a stubbed `box`.
 
 ### The verb trap: there is no `box delete`
 
-**`box delete` does not exist, and the conductor called it for nineteen days.** It was introduced with the condemn on 2026-07-09. box.ascii is pre-1.0 and the bundled CLI tracks a _channel_ rather than a pinned tag (hermes-agent.md § The image), so the verb was retired underneath us. Both the operator Mac and rave-02 run `0.1.135-ascii-prod1`, whose verb set is: `new` `info` `list` `extend` `stop` `resume` `prompt` `interrupt` `events` `limits` `fork` `ssh` `host` `desktop` `scp` `forward` `snapshots` `snapshot`. No `delete`, no `rm`, no `destroy`.
+`box delete` is unavailable. Retire a box with `box stop` followed by `box extend --ttl`; verify supported lifecycle verbs because the CLI tracks a channel.
 
-Because the call sat under `>/dev/null 2>&1 || true`, every condemn since then failed on `unrecognized subcommand` and was swallowed whole — so **every wedged box the conductor ever condemned was orphaned**, each one still taking daily snapshots with `archiveAfter: null`. The 2026-07-27 `box_restoring` 500 did not cause that; it merely made one instance visible.
-
-This is the same class as the claude version trap already documented below, and the lesson generalises: a channel-tracking CLI behind a `|| true` is an error you have decided never to see.
+Propagate and log failures from lifecycle commands issued through a channel-tracking CLI.
 
 ### A condemn ends with the box parked, on a clock, and written down
 
-The replacement mechanism is lifetime-based. `box extend <id> --ttl <seconds>` sets the box's `archiveAfter`, after which box.ascii reclaims the box and its snapshots. Verified end to end on 2026-07-28: a `--ttl 60` on the orphaned box flipped `archiveAfter` from `null` to a timestamp, and the box was gone ~90 seconds later.
+`box extend <id> --ttl <seconds>` sets `archiveAfter`; reclamation completes asynchronously.
 
-Reclamation is therefore **asynchronous**, which inverts the old design. A condemn cannot prove absence in its own tick, so the orphan ledger stops being a fallback and becomes the load-bearing half: every condemned id is written down, and later ticks are what establish that box.ascii actually took it. Four pieces, all in `render-conductor.sh`:
+Reclamation is asynchronous. Every condemned box ID enters the orphan ledger, and later ticks confirm reclamation. Four pieces, all in `render-conductor.sh`:
 
-- **`mark_for_reclaim`** parks the box and sets the TTL. Idempotent, so re-issuing it on an id every tick is safe. It returns the `extend` call's **real exit status** rather than swallowing it — that is the tripwire the old code lacked.
-- **`condemn_box`** calls it, logs whether the TTL was accepted, and **always** files the id. There is no synchronous success to hope for any more.
+- **`mark_for_reclaim`** parks the box and sets the TTL. Idempotent, so re-issuing it on an id every tick is safe. Return the `extend` call's real exit status so TTL failures are visible.
+- **`condemn_box`** calls it, logs whether the TTL was accepted, and always records the ID because reclamation is asynchronous.
 - **`box_gone`** succeeds ONLY when a `box list` positively proves absence. An unreachable API or empty body is "not proven gone", never "reclaimed" — otherwise one wobble would drop an id from the ledger and orphan that box for good.
 - **`reap_orphans`** works the ledger at the top of **every** tick, idle or rendering, bounded by `REAP_PER_TICK` (default 5). It drops the ids box.ascii has taken, re-issues the TTL on the ones it has not (which also repairs an id filed while the API was down), and alerts **once** on a box still standing after `ORPHAN_ALERT_AFTER` (default 6h). Running it before the state machine is deliberate: a wedged box is precisely the case where the next tick is busy rendering on its replacement, so gating the reap on `idle` would leave the orphan standing for a whole render.
 
-The ledger is `boxId<TAB>firstFiledEpoch<TAB>alerted` at `~/.render-conductor/orphan-boxes`, same temp-then-`mv` discipline as the poison ledger. The timestamp is what keeps the reaper quiet through the normal reclamation lag while still speaking up about a box that is genuinely stuck — and if the `extend` verb is ever retired the way `delete` was, the failure now lands in the log immediately and the 6h alert fires, instead of vanishing into a `|| true`.
+The ledger is `boxId<TAB>firstFiledEpoch<TAB>alerted` at `~/.render-conductor/orphan-boxes`, same temp-then-`mv` discipline as the poison ledger. Log `extend` failures immediately, and alert after six hours when an ID remains unreclaimed.
 
 ## Snapshot forensics (read a stopped box without resuming)
 
@@ -117,13 +113,13 @@ A stopped box's filesystem is readable WITHOUT resuming it (no billing for a run
 - `box snapshot tree <id>` — browse the snapshot's filesystem.
 - `box snapshot pull <id>` — pull snapshot files to the operator machine.
 
-For selective extraction of a large file, resume + stream it off (`box ssh -- "gzip -c <file>"` piped to the operator machine), then stop the box. The box CLI verb set (`0.1.135-ascii-prod1`) is `new` `info` `list` `extend` `stop` `resume` `prompt` `interrupt` `events` `limits` `fork` `ssh` `host` `desktop` `scp` `forward` `snapshots` `snapshot`. Two absences bite: there is **no `start`** (`resume` wakes a parked box; `provision-rave-03.sh` creates a new one) and there is **no `delete`** (`stop` + `extend --ttl` is how a box goes away — see the verb trap above). Re-read this list rather than trusting it; the CLI tracks a channel and has retired a verb before.
+For selective extraction of a large file, resume + stream it off (`box ssh -- "gzip -c <file>"` piped to the operator machine), then stop the box. Use `resume` to wake a parked box, the provisioning script to create one, and `stop` plus `extend --ttl` to retire one. Check the current CLI's supported verbs before operating it.
 
 ## Known issues (documented as such)
 
-Two failure modes are known and lived-with, not yet fixed — recognise them rather than re-diagnosing:
+The conductor recovers from these known failure modes:
 
-- **`box ssh` intermittently 500s.** box.ascii's `box ssh` occasionally returns a 5xx unrelated to a restore, which makes the best-effort checkout freshen silently fail — so a long-lived box can render with a days-stale prompt. The freshen is best-effort by design (it renders on the existing checkout on any hiccup); the durable fix for a persistently-stale box is the reap recovery above. The one 5xx that is NO LONGER lived-with is `box_restoring` right after a resume — that one is waited out (see the restoring window above).
+- **`box ssh` intermittently 500s.** The readiness gate waits out `box_restoring`; other intermittent SSH failures leave checkout freshening best-effort. The durable fix for a persistently stale box is the reap recovery above.
 - **A cold-wake tick can exceed its time budget.** A cold wake (resume + wait out the restore + freshen + scp) is the longest tick the conductor runs, and the host unit kills it at `TimeoutStartSec=180`. Dying between resume and trigger is silent. Symptom: the box is resumed but no render started and the state is still `idle`. The readiness wait is bounded at 75s precisely to stay inside that budget; the next hourly tick recovers anyway (the box is already warm, so the tick is fast), or the reap recovery forces it.
 
 ## requeue-video (re-render a shipped finding)
@@ -136,7 +132,7 @@ The conductor emits the render's self-seconds compute to the cost ledger (`video
 
 ## box.ascii CLI quirks (handled)
 
-Wiring the conductor live surfaced several box.ascii CLI realities a stubbed dry-run could not — all handled in the Dockerfile + scripts, recorded so a rebuild does not re-debug them:
+The Dockerfile and conductor scripts implement these box.ascii CLI contracts:
 
 - **The installer needs `$SHELL` set + ends in an interactive onboard.** It runs `basename "$SHELL"` under `set -u` (`$SHELL` unset in a Docker build → exit 2) AND ends with an interactive `box onboard` needing a tty. The Dockerfile sets `SHELL=/bin/sh`, wraps the install `(curl | sh || true)`, and `test -x` the binary; runtime auth is `box login`, never baked.
 - **`box new --ttl` is SECONDS (not a duration string) and is mutually exclusive with `--no-auto-stop`.** The conductor REQUIRES `--no-auto-stop` (it poll-detects done by ssh'ing the RUNNING box; a TTL/auto-stop box would vanish mid-poll), so there is no box-side lifetime backstop — the conductor is the sole stop authority.

@@ -57,15 +57,15 @@ The entry is a live, **public**, **written** Fluncle-voice surface — it lands 
 
 ## The anti-sameness rail (ported from the notes + observations)
 
-The logbook was measured homogenising on prod — three of eight entries titled "Shoulders Down" (sectors 019/018/012), a shared quiet-sector opener, a shared body-clock formula, and the worn-through "Enjoy, cosmonauts." closer (`docs/planning/homogenisation-evidence.md`). This is the SAME proven mechanism the [notes](./note-agent.md) shipped first (which cut within-region overlap 0.041 → 0.015) and the [observations](./observation-agent.md) ported — three layers, deliberately **lighter than the observation port**: there is **no `logbook_rejections` ledger and no attention source**. The sweep's stay-a-gap behaviour is the ledger — a rejected entry is simply not stored, the day stays a gap, and the next tick re-authors it with the spent moves in hand.
+The logbook uses an exact title guard, spent-moves authoring fuel, and a scored body-echo gate. A rejected entry remains a gap for a later pass.
 
 - **Layer A — the deterministic title-collision guard (server).** A title is an enumerable axis, so the guard is **exact, not scored**: `createLogbookEntry` normalizes the candidate title (lowercase, punctuation dropped, whitespace collapsed) and rejects a match against ANY stored title with `title_echoes_logbook`/422 (naming the colliding sector + title). `updateLogbookEntry` applies the same guard but **excludes the sector's own row**, so an operator re-saving a title he already chose passes, while colliding with another sector's does not. Every title is taken once and stays taken.
-- **Layer B — the spent-moves fuel for the author.** `list_logbook_gaps` now carries a top-level `spent` list — the most recent ~12 authored entries as `{ sector, title, opener, closer }` (opener = the body's first sentence, closer = its last, figure tokens stripped). The sweep threads them into the `logbook_entry` prompt (both the registry default and the baked fallback, kept in lockstep) as a list of what is TAKEN, naming the worn moves explicitly (the "Shoulders…" family, the quiet-sector opener, the body-clock formula, the "Enjoy, cosmonauts." closer).
+- **Layer B — the spent-moves fuel for the author.** `list_logbook_gaps` carries a `spent` list containing the most recent ~12 authored entries and threads those moves into the authoring prompt.
 - **Layer C — the scored body echo gate (server).** After the voice gate, `createLogbookEntry` scores the draft body against the **recent 6 OTHER entries' bodies** (token-stripped) with the shared `scoreEcho` (≥4-word lift / ≥0.3 content-word overlap) and hard-fails an echo with `body_echoes_logbook`/422 (carrying the phrase + neighbour sector). The dials live in the `settings` KV (`logbook_echo_min_phrase_words` / `logbook_echo_max_overlap`), **bounded on read** exactly like the observation gate — a nonsense value degrades to the calibrated default, never disabling the gate. The **operator overwrite path stays ungated beyond voice** (a deliberate act); only Layer A applies there.
 
 **The sweep's retry.** On a `title_echoes_logbook` / `body_echoes_logbook` rejection the sweep **re-authors ONCE**, handed the offending title/phrase as the spent move (`ECHO_RETRIES=1`); a second echo leaves the day a gap (`echoSkipped`) for a later, colder pass.
 
-**Graceful degradation for a pre-existing prompt override.** A DB override row for `logbook_entry` authored before this change carries no `{{spentTitles}}`/`{{spentMoves}}`/`{{echoedMove}}` placeholders; the template renderer substitutes an absent variable/block as empty (it is total — an unknown variable renders `""`), so an old override still authors, just without the spent block, until the operator re-saves it with the new placeholders. The server rails (Layers A + C) enforce anti-sameness regardless of which prompt authored the draft.
+Template rendering treats absent variables and blocks as empty. Overrides without the anti-sameness placeholders continue to author, while server gates apply to every draft.
 
 ## The voice rails (the authoring doctrine)
 
@@ -82,17 +82,14 @@ The `claude -p` step authors through the `copywriting-fluncle` skill; the prompt
 
 ## The box cron + host timer (LIVE spec; activation OPERATOR-GATED)
 
-`fluncle-logbook` is the on-box `--no-agent` HYBRID sweep — deterministic gap read + gather, ONE `claude -p` authoring per day, deterministic delivery — mirroring `fluncle-note`. It runs once a day at **00:40 Amsterdam** (shortly after local midnight, so the day that just ended is complete). Source: [`hermes/scripts/logbook-sweep.{sh,ts}`](./hermes/scripts/); the host systemd timer + the full activation + backfill runbook is [`hermes/logbook-timer/README.md`](./hermes/logbook-timer/README.md). It exposes `LOGBOOK_CLAUDE_MODEL` (default `claude-sonnet-4-6`) + `LOGBOOK_CLAUDE_EFFORT` env hooks, and its `/status` freshness row is `cron.logbook` (registered in `@fluncle/registry` + the `fluncle-healthcheck` prober). The repo half is complete; standing the box timer up is an operator step (a new cron — nothing is retired).
+`fluncle-logbook` is the on-box `--no-agent` HYBRID sweep — deterministic gap read + gather, ONE `claude -p` authoring per day, deterministic delivery — mirroring `fluncle-note`. It runs once a day at **00:40 Amsterdam** (shortly after local midnight, so the day that just ended is complete). Source: [`hermes/scripts/logbook-sweep.{sh,ts}`](./hermes/scripts/); the host systemd timer + the full activation + backfill runbook is [`hermes/logbook-timer/README.md`](./hermes/logbook-timer/README.md). It exposes `LOGBOOK_CLAUDE_MODEL` (default `claude-sonnet-4-6`) + `LOGBOOK_CLAUDE_EFFORT` env hooks, and its `/status` freshness row is `cron.logbook` (registered in `@fluncle/registry` + the `fluncle-healthcheck` prober). The operator installs and activates the host timer through the linked runbook.
 
-## Safety rails (inline so they survive even if the skill fails to load)
+## Run bound
 
-- ONE day per run (one `claude -p` authoring per tick); the gap list is the durable worklist, drained oldest-first across ticks.
-- Fill an EMPTY sector ONLY — never overwrite an operator- or already-authored entry (enforced server-side by the PK insert).
-- The entry carries **facts grounded in the day's findings** — never quote or closely paraphrase lyrics, never invent a claim or a coordinate.
-- The entry is **public** the moment it lands on `/logbook` — the voice gate is a hard ship requirement, not a nicety.
+Process one sector-day per tick; the durable gap list drains oldest-first.
 
 ## The prompt lives in the DATABASE, not in the image
 
 The authoring prompt is the `logbook_entry` entry in the **prompt registry** ([docs/agents/prompt-registry.md](./prompt-registry.md)). The sweep fetches it over the AGENT-tier `get_prompt` each tick, so the operator retunes it from `/admin/prompts` or the `fluncle admin prompts` CLI with **no deploy and no box rebake**.
 
-The repo still keeps the baked default (`buildAuthoringPrompt` in `logbook-sweep.ts`), and a failed fetch falls back to it and logs — a prompt store that blinks can never stop the sweep. Every entry records the version that drafted it in `logbook_entries.prompt_version` (`0` = the repo's default, `N` = override N, `NULL` = the baked fallback wrote it).
+The repo provides the baked default; a failed registry fetch falls back to it and logs the failure. Every entry records the version that drafted it in `logbook_entries.prompt_version` (`0` = the repo's default, `N` = override N, `NULL` = the baked fallback wrote it).

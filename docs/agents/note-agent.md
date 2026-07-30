@@ -1,6 +1,6 @@
 # Note Agent (the auto-note — the written-note sibling of the observation)
 
-The **auto-note** auto-authors a finding's **editorial note** — the public line that shows on its `/log/<id>` page (the operator's "why this is here"). Today the operator writes it by hand; this is the path that lets Fluncle write it, mirroring the [observation pipeline](./observation-agent.md) as closely as the difference between _read_ and _heard_ allows. It is one more deterministic-with-one-agentic-step sweep the box runs, not a new runtime. The Worker owns the store + the voice gate; the agent holds only its `FLUNCLE_API_TOKEN` and calls one CLI command.
+The **auto-note** auto-authors a finding's **editorial note** — the public line that shows on its `/log/<id>` page (the operator's "why this is here"). The auto-note lets Fluncle author the editorial line while preserving the operator's ability to write or replace it, mirroring the [observation pipeline](./observation-agent.md) as closely as the difference between _read_ and _heard_ allows. It is one more deterministic-with-one-agentic-step sweep the box runs, not a new runtime. The Worker owns the store + the voice gate; the agent holds only its `FLUNCLE_API_TOKEN` and calls one CLI command.
 
 It is the **written** sibling of the spoken observation: where `observe_track` voice-gates a spoken script and renders it to audio, `note_track` voice-gates a written note and stores it into the finding's `note` field. Both read the same fuel — the firecrawl-derived `context_note` — and both are AGENT tier so the on-box cron drives them.
 
@@ -58,21 +58,21 @@ Showing an author its neighbours' notes is exactly how you get a region of the a
 
 Both thresholds were calibrated against the live archive: its mean max-neighbour overlap is 0.10, nothing in it reaches 0.30, and the gate rejects exactly the two notes that genuinely lift from a neighbour. It bites without paralysing.
 
-**A rejected note is not stored.** The sweep re-authors ONCE (handing the model the phrase it echoed, so it knows which move is spent); a second echo leaves the finding note-less and queued. That is the intended outcome, not a failure — the note is optional, and **silence beats a generic line**.
+**A rejected note is not stored.** The sweep re-authors ONCE, handing the model the phrase it echoed so it knows which move is spent. A second echo leaves the finding note-less and queued for a later pass; silence beats a generic line.
 
 The echo reading rides back on every note response (`echo: { logId, overlap, phrase }`), so the sameness of the corpus is observable rather than assumed.
 
-## The held note: a rejection is not a deletion
+## Held notes
 
-**"Silence beats a generic line" is a rule about what PUBLISHES. It was never a licence to destroy the model's work without telling anyone.** The gate first shipped throwing the rejected line away, and that was the bug: the operator could not read what was binned, could not judge whether it was genuinely worse than nothing, and could not tell a well-set threshold from a wrong one — because the evidence that would settle it was the very thing being deleted. **A pipeline that throws work away without telling anyone is not one anybody can supervise.**
+An echoing note is not published. The gate records it in `note_rejections` so the operator can inspect the candidate, neighbour, lifted phrase, overlap, and thresholds.
 
-So the gate still **refuses to store** an echoing note — unchanged, same thresholds, same 422 — but the line is now **held**, not binned:
+The gate **refuses to store** an echoing note — unchanged, same thresholds, same 422 — but the line is **held**, not binned:
 
 - **It is kept.** The rejected note goes to the `note_rejections` ledger with the neighbour it echoed, **a snapshot of that neighbour's note**, the lifted phrase, the measured overlap, and **the thresholds that were in force at that moment** (snapshotted, so retuning the dials can never rewrite the meaning of a past rejection).
 - **He is told.** Each held note raises a `note-rejected` row in the `/admin` attention queue, and the digest's dispatch names it ("a note the echo gate held back") on the CLI and the Raycast menu bar.
-- **He can overrule it.** The row deep-links to the finding's note dialog (`/admin/findings?note=<trackId>`), where the held note and the neighbour it echoed sit **side by side with the lifted run marked in both** — the pair, not just a verdict, because only the pair lets him tell a good rejection from a badly-tuned one. Three rulings: **Keep it** (writes the line, verbatim), **Edit it** (drops it into the textarea — the common case, since the model is usually right but for the clause it borrowed), **Bin it** (the gate was right).
+- **He can overrule it.** The row deep-links to the finding's note dialog (`/admin/findings?note=<trackId>`), where the held note and the neighbour it echoed sit **side by side with the lifted run marked in both** — the pair, not just a verdict, because only the pair lets him tell a good rejection from a badly-tuned one. Three rulings: **Keep it** writes the line verbatim; **Edit it** loads the candidate for revision; **Bin it** settles the rejection without publishing.
 
-**The ledger is bounded by the ARCHIVE, not by the cron.** A finding holds at most ONE open rejection (a partial unique index on `track_id where resolved_at is null`): the sweep re-authors every tick while a finding stays note-less, so an append-per-attempt ledger would let one stubborn finding write hundreds of rows a day. A re-bounce **updates** the open row (freshest note, `attempts` incremented). Its `created_at` — the queue's oldest-first anchor — is the FIRST hold and never moves, precisely so a repeatedly-bouncing note ages into the working set instead of resetting to the bottom forever; the finding that keeps failing is the one that most needs his eye.
+A partial unique index allows one open rejection per finding. Re-bounces update that row while retaining the first-hold timestamp for queue ordering.
 
 **The ledger observes the pipeline; it never gates it.** A held rejection does not block a future good draft: the finding stays in the note queue (`hasNote=false`), the sweep keeps trying, and a fresh line that clears the gate simply fills the note. **Fill-empty-only stays absolute** — accepting a held note writes through the same atomic `fillEmptyNote` predicate the agent takes, so an operator note that landed in the meantime is never clobbered (it reports `skipped: true` and the standing note wins). A **catalogue** track can never appear in the ledger: every read drives through the `findings ⋈ tracks` inner join.
 
@@ -80,7 +80,7 @@ A **dry run** holds nothing. It is a measurement harness (the A/B re-measurement
 
 ## The dials are tunable — a flip, not a deploy
 
-The two thresholds were calibrated against a **61-note archive at one moment**. That is a measurement, not a law, and the corpus is growing. So they live in the `settings` KV (the house's one flag store) and are retunable at runtime, read fresh on every gating run:
+The thresholds are runtime settings and should be re-measured as the corpus grows. They live in the `settings` KV (the house's one flag store) and are retunable at runtime, read fresh on every gating run:
 
 ```
 fluncle admin notes held [--settled] [--json]     # the held notes + the gate's current dials
@@ -109,7 +109,7 @@ The pipeline board's **Note** cell is an `auto` step that stays **actionable** (
 
 The authoring prompt above is the `note_author` entry in the **prompt registry** ([docs/agents/prompt-registry.md](./prompt-registry.md)). The sweep fetches it over the AGENT-tier `get_prompt` each tick, so the operator can retune it from `/admin/prompts` or the CLI with **no deploy and no box rebake** — which matters most for THIS prompt, because the neighbour block is the front line against every note in a galaxy reading the same, and it is going to get tuned a lot.
 
-The repo still keeps the baked default (`buildAuthoringPrompt` in `note-sweep.ts`), and a failed fetch falls back to it and logs. A prompt store that blinks can never stop the sweep. Every note records the version that drafted it in `findings.note_prompt_version` (`0` = the repo's default, `N` = override N, `NULL` = the baked fallback wrote it, or an operator typed it), so "the notes got worse last week" has an answer.
+The repo provides the baked default, and every note records its drafting source in `note_prompt_version` (`0` = the repo's default, `N` = override N, `NULL` = the baked fallback wrote it, or an operator typed it).
 
 ## The box cron (LIVE)
 
@@ -117,7 +117,7 @@ The repo still keeps the baked default (`buildAuthoringPrompt` in `note-sweep.ts
 
 ## Re-measuring the layer (when the corpus grows, do this again)
 
-The neighbour layer earns its place only if the prose is BETTER. That is not a claim to take on trust, so it is measurable on demand — the same harness that proved it, re-runnable:
+Re-measure the neighbour layer as the corpus grows with the dry-run treatment/control harness below:
 
 ```bash
 # the treatment arm: author with the neighbourhood, gate, print, store nothing
@@ -129,12 +129,6 @@ NOTE_NEIGHBORS=0 bun docs/agents/hermes/scripts/note-sweep.ts --dry-run 011.5.9D
 
 Read the two sets side by side, and score them with `scoreNoteEcho` (the same function the gate uses). What matters: the notes in one region must not read like each other. If a future model, prompt, or corpus makes them converge, **turn the layer off** (`NOTE_NEIGHBORS=0`) — it is a net negative the moment it flattens the voice.
 
-## Safety rails (inline so they survive even if the skill fails to load)
+## Run bound
 
-- One finding per run (one `claude -p` authoring per tick, plus at most ONE re-author when the echo gate rejects); the queue is the durable worklist.
-- Fill an EMPTY note ONLY — never overwrite an operator-written or already-set note (enforced server-side, atomically, by a DB predicate). This holds for the operator ACCEPTING a held note too: it takes the same predicate, so it can never clobber a note that landed since.
-- A CATALOGUE track can never be given a note: every finding read drives through the `findings ⋈ tracks` join, so an uncertified track 404s before a word is gated. Fluncle does not speak about a track he has not certified. The same join guards the rejection ledger.
-- The note carries **facts grounded in the `context_note`** — never quote or closely paraphrase lyrics, never invent a claim, never fabricate scene history.
-- The neighbourhood **informs, it never templates**. A note that reads like its neighbours is not stored, and the finding stays note-less.
-- A rejected note is **held, never binned** — it lands in the ledger and the `/admin` queue for the operator to read and rule on. The gate may refuse to publish; it may not destroy the evidence of its own decisions.
-- The note is **public** the moment it lands on `/log` — the voice gate is a hard ship requirement, not a nicety.
+Process one finding per run: one `claude -p` authoring call per tick, plus at most one re-author when the echo gate rejects. The queue is the durable worklist.

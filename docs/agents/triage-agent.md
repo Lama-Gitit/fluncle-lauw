@@ -1,10 +1,10 @@
 # Triage Agent (the submission pre-chew — the queue-legwork sibling of the auto-note)
 
-The **submission-triage sweep** pre-chews a pending crew submission before the operator gets to it, so a submitted banger arrives in the `/admin` attention queue already assessed. Today a submission lands in the review tray with only its raw metadata; this is the path that lets Fluncle write a first read on it — a one-line **triage verdict** ("looks like a find / already logged / not our lane"). It is one more deterministic-with-one-agentic-step box sweep, mirroring the [auto-note](./note-agent.md), not a new runtime. The Worker owns the store + the length gate; the agent holds only its `FLUNCLE_API_TOKEN` and calls one CLI command.
+The **submission-triage sweep** adds a one-line advisory verdict to each pending submission before it reaches the operator's attention queue. It runs as a deterministic box sweep with one agentic authoring step, following the auto-note runtime pattern. The Worker owns the store + the length gate; the agent holds only its `FLUNCLE_API_TOKEN` and calls one CLI command.
 
-It is the **queue-legwork** sibling of the auto-note: where `note_track` voice-gates a public editorial note and stores it onto a finding, `triage_submission` length-gates an operator-internal advisory verdict and stores it onto a pending submission. Both are AGENT tier so the on-box cron drives them. The crucial line: **the verdict is advisory only — approve/reject stays operator tier and untouched. The sweep does legwork; publishing authority never moves.**
+It is the **queue-legwork** sibling of the auto-note: where `note_track` voice-gates a public editorial note and stores it onto a finding, `triage_submission` length-gates an operator-internal advisory verdict and stores it onto a pending submission. Both are AGENT tier so the on-box cron drives them.
 
-## The verdict vs the decision (don't conflate them)
+## Verdict and decision
 
 |           | the triage `verdict` (the pre-chew read)                                                             | the approve/reject **decision**                                                     |
 | --------- | ---------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------- |
@@ -16,7 +16,7 @@ It is the **queue-legwork** sibling of the auto-note: where `note_track` voice-g
 ## The commands
 
 ```
-fluncle admin submissions                                            # the pending review queue (now carries triageVerdict)
+fluncle admin submissions                                            # the pending review queue (includes `triageVerdict`)
 fluncle admin submissions triage <submissionId> --verdict-file v.txt  # write the advisory verdict (pending only)
 fluncle admin submissions triage <submissionId> --verdict "<text>"    # inline form
 ```
@@ -40,13 +40,12 @@ The verdict is operator-**internal** — it never reaches a public surface — s
 
 A pending submission is one row in the `/admin` attention queue (source `submission`, the tray glyph), oldest-first, deep-linking to the exact candidate in the review tray (`/admin/findings?submission=<id>`). When the sweep has visited, the row renders the verdict one-liner beneath its meta; the primary action is **Review** (never an inline approve/reject — the decision lives in the tray). See [admin-shell.md](../admin-shell.md).
 
-## The box cron (repo half shipped; box enable OPERATOR-GATED)
+## The box cron (operator-gated activation)
 
 `fluncle-triage` is the on-box `--no-agent` hybrid sweep — deterministic queue + dedupe + ONE `claude -p` verdict + deterministic delivery — mirroring `fluncle-note`. Source: [`hermes/scripts/triage-sweep.{sh,ts}`](./hermes/scripts/). The timer units + the activation runbook (it reuses the shared secret file + agent token — no new secret) live in [`hermes/triage-timer/`](./hermes/triage-timer/README.md).
 
 ## Safety rails (inline so they survive even if the skill fails to load)
 
-- The verdict is **advisory only** — the sweep NEVER approves or rejects; the operator decides.
 - Write onto a **pending** submission only (a reviewed one is a 409, enforced server-side).
 - The verdict is grounded in the deterministic dedupe + plausibility read — never invent a fact about the track.
 - One submission per `claude -p` call (BATCH_CAP=3 per tick); the pending queue is the durable worklist.
@@ -55,4 +54,4 @@ A pending submission is one row in the `/admin` attention queue (source `submiss
 
 The authoring prompt is the `triage_verdict` entry in the **prompt registry** ([docs/agents/prompt-registry.md](./prompt-registry.md)). The sweep fetches it over the AGENT-tier `get_prompt` each tick, so the operator retunes it from `/admin/prompts` or the `fluncle admin prompts` CLI with **no deploy and no box rebake**.
 
-The repo still keeps the baked default (`buildTriagePrompt` in `triage-sweep.ts`), and a failed fetch falls back to it and logs — a prompt store that blinks can never stop the sweep. Every verdict records the version that drafted it in `submissions.triage_prompt_version` (`0` = the repo's default, `N` = override N, `NULL` = the baked fallback wrote it).
+The repo provides `buildTriagePrompt` as the baked fallback. If registry retrieval fails, the sweep logs the failure and uses that default. Every verdict records the version that drafted it in `submissions.triage_prompt_version` (`0` = the repo's default, `N` = override N, `NULL` = the baked fallback wrote it).

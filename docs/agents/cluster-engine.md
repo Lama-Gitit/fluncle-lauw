@@ -1,6 +1,6 @@
 # Cluster Engine (the sonic galaxies — browse-by-feel)
 
-The **cluster engine** keeps Fluncle's **sonic galaxies** current: it groups the archive into a stable, operator-named map of k-means regions over the MuQ audio-embedding space, so a finding lands in a galaxy by how it _sounds_. The galaxies stopped being the four fictional vibe quadrants and became the real, sound-derived map (ratified in the browse-by-feel RFC, pruned once built — this doc carries its durable content; canon in [track-lifecycle.md](../track-lifecycle.md)). This is a deterministic on-box sweep, not a new runtime and not an agent — zero LLM tokens, pure math. The Worker owns the map store + the identity mint; the box holds only its `agent`-scoped `FLUNCLE_API_TOKEN` and drives the map through the `fluncle` CLI.
+The **cluster engine** keeps Fluncle's **sonic galaxies** current. The galaxies form a stable, sound-derived map of k-means regions over the MuQ embedding space, so a finding lands in a galaxy by how it _sounds_. This is a deterministic on-box sweep, not a new runtime and not an agent — zero LLM tokens, pure math. The Worker owns the map store + the identity mint; the box holds only its `agent`-scoped `FLUNCLE_API_TOKEN` and drives the map through the `fluncle` CLI.
 
 It is the **grouping** sibling of the [embed cron](./hermes-agent.md): where `fluncle-embed` computes each finding's 1024-d MuQ vector, `fluncle-cluster` reads the whole embedded corpus back and assigns each finding to its nearest galaxy centroid over that same space (the exact cosine metric `list_similar_tracks` ranks with).
 
@@ -20,7 +20,7 @@ Each night the tick does ONE bounded step — no clustering fit runs:
 
 A nightly full re-fit — even warm-started — is the one thing this design forbids. sklearn's Lloyd loop can never emit an empty cluster: `_relocate_empty_clusters` moves an emptied centroid to a high-inertia far point (an arbitrary different sonic region), and with equal k the post-hoc label matching is perfect, so the teleported centroid inherits a prior stable id — exactly the bookmark-breaking reshuffle the feature forbids. So a full `KMeans.fit` runs ONLY inside an operator act:
 
-- **Cold start (`--cold-start`, run 1 — a snap, not a ratchet):** one full fit at **k = 4 (operator-held after the k=9 pilot spread the map thin; `FLUNCLE_CLUSTER_K` overrides per fit)** over the whole corpus. Every cluster gets a server-minted id + handle and enters the naming queue. The map must be empty (else use `--remint`).
+- **Cold start (`--cold-start`, run 1 — a snap, not a ratchet):** Run the cold-start fit over the whole corpus at `k = 4`; `FLUNCLE_CLUSTER_K` overrides k for an attended fit. Every cluster gets a server-minted id + handle and enters the naming queue. The map must be empty (else use `--remint`).
 - **Split (operator-gated, consumed on the nightly tick):** the operator requests a split in `/admin/galaxies` (`update_galaxy` sets `split_requested_at`; the box's agent token cannot call that OPERATOR-tier op). The next nightly tick **consumes** it (pulled, not pushed): a k=2 fit on that galaxy's members only, the parent keeps its id on the **larger** child, the Worker mints ONE new id + handle for the smaller child, which lands unnamed in the naming queue. The tick clears `split_requested_at` in the same map write so it can never re-fire.
 - **Remint (`--remint`, a deliberate full reset):** never on the cron. A fresh full fit at the held k (4; `FLUNCLE_CLUSTER_K` overrides) that retires every old id and re-queues the whole map for naming. Reserved for an embed-model change (a different checkpoint / `EMBEDDING_DIMS` stales every centroid) or a corpus shift too large for splits.
 
@@ -59,26 +59,17 @@ The OPERATOR-tier `update_galaxy` (naming / rename / request-split) is NOT one t
 
 `fluncle-cluster` is the on-box `--no-agent` deterministic sweep — a rave-02 HOST systemd timer (nightly, 02:20 Amsterdam), the same host-timer shape as `fluncle-embed` (a stateful batch job must not ride the shared 5-minute gateway runner). Source: [`hermes/scripts/cluster-sweep.{sh,ts}`](./hermes/scripts/) + [`cluster.py`](./hermes/scripts/cluster.py). The full box wire-up (units, install, the pre-smoke, the operator acts) is [`hermes/cluster-timer/README.md`](./hermes/cluster-timer/README.md).
 
-### Operator runbook — the cold-start pilot (de-risks the most)
+## Operator cold start
 
-Before the timer is armed and before any naming, the operator runs the fit by hand (held k = 4) and eyeballs the split with the operator's ear (the RFC's one highest-value de-risking step):
+Before enabling the timer or naming galaxies, run the cold-start fit manually, review the silhouette and membership summaries, and audition each galaxy.
 
 ```bash
 # On rave-02, against the live map (or a dev DB for a dry pilot):
 docker exec -u hermes -e HOME=/opt/data/home hermes bash /opt/hermes-scripts/cluster-sweep.sh --cold-start
 # Read the summary: 4 galaxies minted (the held k), every finding assigned, the per-galaxy silhouette + size.
-# Then the naming sitting (Slice 3): open /admin/galaxies, audition each galaxy's member previews,
-# name them all. The public lens (Slice 4) ships only once the initial map is fully named.
+# Open /admin/galaxies, audition each galaxy's previews, and name the complete initial map before exposing it publicly.
 ```
 
 ### Box activation
 
-Unlike a pure-script cron, `fluncle-cluster` needs the **image rebaked before activation**: the MuQ venv gains sklearn + scipy (the third pinned pip step) and the sweep trio must be baked in. The verbs shipped in the Slice 1 CLI release; Slice 2's additive request/response fields pass through the thin CLI at runtime, so no NEW CLI verb is required — only the rebake (the standard pin-watch rebuild, or an attended `--force` rebuild) + `install-host-timers.sh` to lay down the timer. The operator drives the box side. pin-watch's pre-smoke imports `torch, muq, sklearn, scipy`, so a broken stack rolls back.
-
-## Safety rails (inline so they survive even if a doc is missed)
-
-- The **nightly tick never fits** — assignment-only, so ids are stable and a bookmarked galaxy can never teleport. A full fit is an explicit operator act (`--cold-start` / `--remint`) or an operator-requested split consumed on the tick.
-- The **box never mints identity** — ids + handles are minted server-side inside `update_galaxy_map`.
-- **Naming is operator-only** — the box's agent token 403s the OPERATOR-tier `update_galaxy`; a machine handle never renders publicly.
-- **A re-run never renames a galaxy** — the name is decoupled from the drifting math (minted-once-and-stored).
-- The map write is **one transaction** (`db.batch`) and the run is **resume-safe** — no assignment ever points at a missing map row; member counts are derived, never drift.
+Activation requires an image rebuild with sklearn, scipy, and the sweep files, followed by `install-host-timers.sh`. The existing CLI verbs carry the map fields. pin-watch's pre-smoke imports `torch, muq, sklearn, scipy`, so a broken stack rolls back.

@@ -35,7 +35,7 @@ Run the nightly admin-smoke diagnosis.
 1. `git pull --ff-only`, then `bun run --cwd apps/web smoke:routine`. It boots an isolated dev stack on dedicated ports, runs the three admin browser smokes (shell, queue with SEED=1, touch), tears down, and ends with one summary line: `SMOKE ROUTINE: shell=… queue=… touch=…`.
 2. ALL PASS → reply with that one line and stop. Nothing else.
 3. Any FAIL → diagnose before reporting. For each failing assertion: read the assertion and the UI/server code it exercises, and `git log` the surfaces involved. Classify:
-   - FIXTURE ROT — the product changed deliberately (find and cite the commit) and the smoke is stale. Fix it: edit ONLY files under `apps/web/tests/browser/`, re-run `smoke:routine` to green, commit with a `test(smokes): …` message. Do NOT push. Include the commit hash in your report.
+   - FIXTURE ROT — the product changed deliberately (find and cite the commit) and the smoke is stale. Fix it: edit the stale smoke, re-run `smoke:routine` to green, commit with a `test(smokes): …` message. Include the commit hash in your report.
    - SUSPECTED REGRESSION — no deliberate change explains it. Touch NOTHING. Report the failing assertion, the suspect commit(s), and what a human should inspect.
 4. Report: one line per smoke — PASS / ROT-FIXED <commit> / REGRESSION-SUSPECTED — then detail only for non-PASS.
 

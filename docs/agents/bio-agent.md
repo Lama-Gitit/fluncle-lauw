@@ -21,21 +21,21 @@ Both are on-box HYBRID `--no-agent` sweeps — a deterministic queue + ONE `clau
 
 Each tick:
 
-1. **QUEUE** (deterministic): `fluncle admin <kind>s describe --queue --json` → bio-empty entities whose page is INDEXABLE, oldest first. A bare array of `{ id, name, slug }`. Empty → fast no-op. "Indexable" is the SAME two-way floor the entity pages render on: `bio IS NULL/''` AND (a certified finding exists **OR** the renderable-track count clears the page's thin-content floor — `ARTIST_INDEX_MIN_FINDINGS` / `LABEL_INDEX_MIN_TRACKS` / `ALBUM_INDEX_MIN_TRACKS`, all 3, counted exactly as the sitemap reads count: certified findings + catalogue anti-join tracks). So a crawl-minted, findings-free catalogue entity that has a real page earns a bio too — it no longer stands with a full tracklist and no dossier. The floor is the cost bound: it keeps the wide crawl's thousands of one-track stubs out of the Firecrawl + `claude -p` path.
+1. **QUEUE** (deterministic): `fluncle admin <kind>s describe --queue --json` → bio-empty entities whose page is INDEXABLE, oldest first. A bare array of `{ id, name, slug }`. Empty → fast no-op. "Indexable" is the SAME two-way floor the entity pages render on: `bio IS NULL/''` AND (a certified finding exists **OR** the renderable-track count clears the page's thin-content floor — `ARTIST_INDEX_MIN_FINDINGS` / `LABEL_INDEX_MIN_TRACKS` / `ALBUM_INDEX_MIN_TRACKS`, all 3, counted exactly as the sitemap reads count: certified findings + catalogue anti-join tracks). A crawl-minted, findings-free catalogue entity with an indexable page earns a bio when it clears the renderable-track floor. The floor is the cost bound: it keeps the wide crawl's thousands of one-track stubs out of the Firecrawl + `claude -p` path.
 2. per entity (bounded batch, `ENTITY_BIO_BATCH_CAP`, default 1):
    - **DRAFT** (deterministic, Worker-paced): `fluncle admin <kind>s draft-bio <slug> --json` → the `draft_artist_bio` / `draft_label_bio` READ. The **Worker** runs the Firecrawl gather (with its key) + pulls the logged finding **titles** (with its DB) and assembles the registered `describe_artist` / `describe_label` prompt, returning `{ found, name, findingCount, prompt, promptVersion, hasFacts }`. A `found:false` (unresolved slug) or a failed call → skip (stays queued).
    - **AUTHOR** (the one agentic step): run `claude -p` (`claude-sonnet-4-6`, subscription auth, read-only tools) on the Worker-supplied `prompt` so it loads `copywriting-fluncle`.
    - **DELIVER** (deterministic): `fluncle admin <kind>s describe <slug> --bio-file <tmp> --prompt-version <v>` → the Worker voice-gates, fills-empty-only, stores.
 
-## The grounding is Worker-paced (the gap is CLOSED)
+## Worker-paced grounding
 
 The bio is grounded in **Firecrawl FACTS** (the entity's background, scene, release history — the raw snippets ARE the facts) **plus the titles of the tracks Fluncle has actually logged**. The box is a thin CLI client and holds **neither** a `FIRECRAWL_API_KEY` (by convention — the Worker owns it; `context-sweep.ts`) **nor** a read that exposes an entity's finding TITLES (only a `findingCount`). So on its own the box cannot ground a bio at all.
 
-The `draft_artist_bio` / `draft_label_bio` READ closes both gaps at once — the **exact parity the context-note sweep already has**, where the box triggers a Worker read for its grounding and then authors. On this READ the Worker runs Firecrawl with **its** key (`fetchEntityFacts`, `lib/server/bio.ts`), pulls the logged finding titles from **its** DB (`getFindingsByArtist` / `getFindingsByLabel` / `getFindingsByAlbum`), assembles the registered prompt (`buildEntityBioPrompt`), and hands the box a ready-to-author prompt + its provenance version. The consequence that matters: **the on-box crons now produce GROUNDED bios**, not only the manual backfill. The read publishes nothing and returns only public facts (web snippets + finding titles), never a secret.
+The `draft_artist_bio` / `draft_label_bio` READ closes both gaps at once — the **exact parity the context-note sweep already has**, where the box triggers a Worker read for its grounding and then authors. On this READ the Worker runs Firecrawl with **its** key (`fetchEntityFacts`, `lib/server/bio.ts`), pulls the logged finding titles from **its** DB (`getFindingsByArtist` / `getFindingsByLabel` / `getFindingsByAlbum`), assembles the registered prompt (`buildEntityBioPrompt`), and hands the box a ready-to-author prompt + its provenance version. On-box and manual bio runs use the same Worker-grounded path. The read publishes nothing and returns only public facts (web snippets + finding titles), never a secret.
 
-**Because the bio is FACTUAL, no facts means REFUSE — not improvise.** A first-person observation could always fall back on the sound alone; a factual dossier cannot invent a biography from a bare name. This refusal has two rails. **First, the sweep's authorability guard (`isAuthorableDraft`) requires real grounding BEFORE it ever spends a `claude -p`: Firecrawl facts (`hasFacts`) OR at least one finding title (`findingCount > 0`).** Before #643 every queued entity carried ≥1 certified finding, so the guard's fallback always had real titles; now the queue also admits indexable findings-free CATALOGUE entities, and one can arrive with `hasFacts:false AND findingCount:0` — a prompt the Worker still rendered (the template always does) but with NOTHING to ground on. That entity is a clean **skip**: it stays queued (retried next tick) and, if Firecrawl never yields facts, simply stays bio-less — the honest outcome, its page shows the tracklist and no apology. So the zero-findings case is now refused up front, not just the empty-facts case. **Second**, even when there is _some_ grounding, the Worker's `hasFacts:false` arm tells the author to write **at most one plain, certain sentence from the findings, or nothing**, and the gate's 40-char floor (`BIO_MIN_CHARS`) turns a too-thin stub into a clean NO-WRITE (`bio_too_short`, 422) — the entity stays queued, no hallucinated CV ever lands. The floor is load-bearing for exactly this reason — do not lower it.
+**Because the bio is FACTUAL, no facts means REFUSE — not improvise.** A first-person observation could always fall back on the sound alone; a factual dossier cannot invent a biography from a bare name. This refusal has two rails. **First**, `isAuthorableDraft` requires Firecrawl facts or at least one finding title before invoking `claude -p`. An entity with neither is skipped and remains bio-less. **Second**, even when there is _some_ grounding, the Worker's `hasFacts:false` arm tells the author to write **at most one plain, certain sentence from the findings, or nothing**, and the gate's 40-char floor (`BIO_MIN_CHARS`) turns a too-thin stub into a clean NO-WRITE (`bio_too_short`, 422) — the entity stays queued, no hallucinated CV ever lands. The floor is load-bearing for exactly this reason — do not lower it.
 
-**No Firecrawl key on the box.** Because the gather runs Worker-side in the `draft-bio` read, the box needs no `FIRECRAWL_API_KEY` — the earlier box-mirrored `fetchEntityFacts` is gone. On-box bios come out Firecrawl-grounded, exactly like the manual backfill.
+The `draft-bio` read gathers facts Worker-side, so the box requires no `FIRECRAWL_API_KEY`.
 
 ## The cardinal safety guarantee: fill an EMPTY bio only
 
@@ -47,9 +47,9 @@ The bio is a live, **public** Fluncle surface. `gateBioText` (`lib/server/bio.ts
 
 ### The name exemption: the gate polices what FLUNCLE wrote
 
-The scan runs over the bio **with the entity's own name masked out** (`maskEntityName`, `lib/server/bio.ts`) — exact, case-insensitive occurrences of the full name, nothing else. An entity's name is not Fluncle's prose: "Future Signal", "Invaderz Transmissions", and "Jungle Sound: The Bassline Strikes Back!" are real-world names, and a bio about them must be able to name them. Without the exemption those three were **unwritable** — a bio necessarily names its subject, so every rewrite tripped the same ban and no draft could ever pass.
+The scan runs over the bio **with the entity's own name masked out** (`maskEntityName`, `lib/server/bio.ts`) — exact, case-insensitive occurrences of the full name, nothing else. An entity's name is not Fluncle's prose: "Future Signal", "Invaderz Transmissions", and "Jungle Sound: The Bassline Strikes Back!" are real-world names, and a bio about them must be able to name them.
 
-Nothing about the bans changed: `BANNED_WORDS`, the Dry Rule, the "we" ban, and both length bounds are exactly as they were. Only the TEXT handed to the scanner changed. Two properties follow, and both are pinned by tests:
+The scan applies `BANNED_WORDS`, the Dry Rule, the "we" ban, and both length bounds after masking exact occurrences of the entity's full name. Two properties follow, and both are pinned by tests:
 
 - **The word is not amnestied, only the name.** A bio may name "Future Signal" and still fails if it uses "signal" as a generic word anywhere else in the paragraph.
 - **Masking the full name removes the punctuation inside it**, which is how an album titled with a `!` clears the Dry Rule without the Dry Rule being weakened for anything Fluncle actually wrote.
@@ -62,10 +62,10 @@ A **partial** reference is still judged: a bio about "Future Signal" that says o
 
 ### The attempt budget: three authorings, ever
 
-A rejection used to leave the entity queued with nothing counting the attempts, so "retry" meant "forever" — three entities were re-authored ~90 times each over two days. An entity now gets **at most three authoring attempts, ever**: the initial draft plus two rewrites.
+Each entity receives at most three authoring attempts: the initial draft plus two rewrites.
 
 - **Each rejection is fed back into the next pass** as the exact reason to fix (`buildRewriteBlock` in the sweep, the logbook sweep's shape), so a rewrite is aimed rather than blind.
-- **The third draft LANDS.** The last attempt delivers `--final-attempt`, and the Worker (`acceptFinalDraftBio`) stores the draft even if the voice scan refuses it. This is a BACKSTOP, not the routine path — with the name exemption in place, the entities that caused the runaway now clear the gate on attempt 1.
+- **The third draft LANDS.** The last attempt delivers `--final-attempt`, and the Worker (`acceptFinalDraftBio`) stores the draft even if the voice scan refuses it. Final-attempt acceptance is a backstop; the name exemption lets ordinary subject-name matches clear the normal voice gate.
 - **The acceptance is never silent.** The Worker logs `describe_<kind>: FINAL-ATTEMPT ACCEPTANCE`, returns `gateBypassed: true` + the accepted `voiceViolations`, the CLI prints them, and the sweep logs `FINAL-ATTEMPT ACCEPTANCE … REVIEW THIS <KIND>` and counts them as `bypassedGate` in its summary line. **Grep the cron output for `FINAL-ATTEMPT ACCEPTANCE` to find every bio that landed this way.** The acceptance bypasses the voice SCAN only: an absent, too-short, or too-long draft is still refused.
 - **Only a gate REJECTION spends the budget.** A rejection is deterministic evidence that this draft was bad. A transport or model failure — a `claude -p` that exits non-zero, returns `is_error`, or returns nothing — is no evidence about the draft at all, because there is no draft; the entity keeps its whole budget and is retried next tick. Otherwise three flaky calls could write an entity off permanently, and a flaky THIRD call would leave it with no draft to accept and no retry. Those failures instead log a line the `/status` sweep-strain detector scores, so a sweep grinding on a broken model surfaces as `degraded`.
 - **The count persists across ticks** in a small on-box TSV at `$HOME/.entity-bio-sweep/attempts` (`<kind>:<slug><TAB>attempts<TAB>lastEpoch`), the shape of the render conductor's poison ledger and covered by the nightly box-state backup. It is written the moment a rejection lands, so a tick that dies later cannot un-spend it. The entry is dropped the moment a bio lands.
@@ -96,21 +96,19 @@ The **machine-readable discovery layer** is the half that surprises people, beca
 
 It does **not** reach `llms.txt`, the sitemap, any RSS/Atom/JSON/podcast/ICS feed, oEmbed, the OG images, `GET /api/v1/artists/{slug}` (that contract carries no `bio` field — an asymmetry with labels and albums), WebMCP, mobile, the SSH terminal, DNS, Raycast, or the extension.
 
-**Finding one.** Grep the cron output for `FINAL-ATTEMPT ACCEPTANCE`; the sweep's summary line carries a `bypassedGate` count; the Worker logs `describe_<kind>: FINAL-ATTEMPT ACCEPTANCE`; the `describe_*` API response carries `gateBypassed: true` + `voiceViolations`; the CLI prints both. **That log line is the only durable record** — `bio_status` has no value for "landed via the final attempt", so once the cron marker rotates a bypassed bio is indistinguishable in the database from one that cleared the gate.
-
-**This is a deliberate operator ruling**, taken after a canon review recommended dropping the acceptance on the grounds that the name exemption already clears the entities it was introduced for. To reverse it, `apps/web/src/lib/server/bio.ts` carries the removal recipe under `SEVERABLE`; nothing else depends on it, and a third rejected draft would simply land on the `exhausted` outcome the sweep already implements.
+Final-attempt acceptance is an operator-controlled policy. To disable it, follow the `SEVERABLE` recipe in `bio.ts`; rejected third drafts then take the existing `exhausted` outcome.
 
 ## The prompt lives in the DATABASE, not in the image
 
-The authoring prompt is the `describe_artist` / `describe_label` entry in the **prompt registry** ([prompt-registry.md](./prompt-registry.md)). The **Worker** resolves and renders it inside the `draft-bio` read (`buildEntityBioPrompt` → `renderRegisteredPrompt`), so the operator can retune it from `/admin/prompts` or the CLI with **no deploy and no rebake**, and the box no longer carries any baked copy of the bio prompt (nothing on-box can drift from the registry). Every bio records the version that drafted it (the Worker returns `promptVersion`, stamped via `--prompt-version` onto the entity's `*_bio_prompt_version`; `0` = registry default, `N` = override N).
+The authoring prompt is the `describe_artist` / `describe_label` entry in the **prompt registry** ([prompt-registry.md](./prompt-registry.md)). The Worker resolves and renders the registry entry, so the operator can retune it from `/admin/prompts` or the CLI with **no deploy and no rebake**; the box consumes that rendered prompt and carries no independent prompt copy. Every bio records the version that drafted it (the Worker returns `promptVersion`, stamped via `--prompt-version` onto the entity's `*_bio_prompt_version`; `0` = registry default, `N` = override N).
 
-## Box activation is OPERATOR-GATED (repo half shipped)
+## Operator activation
 
-The repo half ships — the sweep, the two `.sh` wrappers, the two host timers, the registry + `/status` wiring, and this doc. **Nothing auto-enables and nothing spends model credits on merge**, mirroring the crawler / cluster / triage pattern. The operator enables the timers after a dry-run pre-flight (each timer's README). The box needs no Firecrawl key — the gather runs Worker-side.
+The sweep, wrappers, host timers, registry, and `/status` wiring are repo-managed. The operator enables each timer after its README's dry-run preflight.
 
 ### The backfill (bounded corpus, one operator run)
 
-The corpus is bounded (tens of artists + labels). `ENTITY_BIO_BATCH_CAP` makes the backfill simply the sweep run once with a high cap. It now goes through the **same Worker `draft-bio` read** as the box crons, so it no longer needs a local `FIRECRAWL_API_KEY` — the Worker gathers the facts. It is just a high-cap run of the same sweep (run locally so the subscription token authors `claude -p`). Operator-run, never auto-run:
+The corpus is bounded (tens of artists + labels). `ENTITY_BIO_BATCH_CAP` makes the backfill simply the sweep run once with a high cap. The backfill uses the Worker `draft-bio` read and requires no local `FIRECRAWL_API_KEY`. It is just a high-cap run of the same sweep (run locally so the subscription token authors `claude -p`). Operator-run, never auto-run:
 
 ```bash
 # Requires in the local env: CLAUDE_CODE_OAUTH_TOKEN (subscription auth for claude -p) and
@@ -136,13 +134,3 @@ bun docs/agents/hermes/scripts/entity-bio-sweep.ts --kind artist --dry-run <slug
 bun docs/agents/hermes/scripts/entity-bio-sweep.ts --kind label  --dry-run <slug-a> <slug-b>
 bun docs/agents/hermes/scripts/entity-bio-sweep.ts --kind album  --dry-run <slug-a> <slug-b>
 ```
-
-## Safety rails (inline so they survive even if the skill fails to load)
-
-- One entity per tick (one `claude -p` authoring); the queue is the durable worklist. `ENTITY_BIO_BATCH_CAP` raises it for the operator backfill only.
-- Fill an EMPTY bio ONLY — never overwrite an operator-written or already-set bio (enforced server-side, atomically, by a DB predicate).
-- An INDEXABLE entity gets a bio — certified OR findings-free: the queue admits a `bio`-empty entity with either a certified finding OR a renderable-track count at the indexable floor (≥3, counted as the sitemap reads count). A crawl-minted catalogue entity that clears the floor is in; a thin (<3) findings-free stub stays out. The floor caps Firecrawl + `claude -p` cost against the wide crawl.
-- For a findings-free catalogue entity the grounding is **Firecrawl facts + identity only** — the box has no on-box finding TITLES to lean on (there are none logged). The refuse-if-no-facts rail is what makes this safe, and it now covers the ZERO-findings case too: `isAuthorableDraft` requires facts OR ≥1 finding title before authoring, so a findings-free entity Firecrawl yields nothing on is a clean skip that never reaches `claude -p` (backstopped by the 40-char floor if it did). Such an entity stays bio-less, and — post the artist-page fix — a bio-less page shows no apology, just its tracklist.
-- The bio carries **facts grounded in the Firecrawl snippets** + what Fluncle has logged — never invent a discography, roster, date, or scene credential. If the facts are thin, say less.
-- The bio is **public** the moment it lands on the entity page — the voice gate is a hard ship requirement, not a nicety.
-- Subscription auth only (`CLAUDE_CODE_OAUTH_TOKEN`) — zero OpenRouter tokens, never a raw API key in the repo.
