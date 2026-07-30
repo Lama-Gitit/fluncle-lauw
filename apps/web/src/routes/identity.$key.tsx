@@ -35,7 +35,7 @@ import { type IdentityPageData } from "./-identity-page-data";
 //
 // ── AN UNKNOWN KEY IS A 200, NOT A 404 ────────────────────────────────────────────────────────
 // Unlike `/artist/<slug>`, where an unknown slug means the page does not exist, an unknown
-// identifier here is a real question with a real answer: nothing Fluncle has answers to it. Saying so
+// identifier here is a real question with a real answer: nothing Fluncle has on file matches it. Saying so
 // at 200 is the honest negative this whole surface is built to say out loud; a 404 would claim the
 // question was never asked. Nothing is invited from that state — no submission affordance, on the
 // same reasoning the op carries (a wrong guess must never seed the crew's triage queue).
@@ -103,7 +103,7 @@ export function IdentityAnswer({ data }: { data: IdentityPageData }) {
           <h1 className="log-coordinate identity-key">
             {data.status === "limited" ? "Identity" : data.key}
           </h1>
-          <p className="log-index-intro">{introLine(data)}</p>
+          <IntroLine data={data} />
         </header>
 
         {data.status === "found"
@@ -130,27 +130,27 @@ export function IdentityAnswer({ data }: { data: IdentityPageData }) {
   );
 }
 
-/** The one factual line under the key: what came back, in plain words. */
-function introLine(data: IdentityPageData): string {
-  if (data.status === "limited") {
-    return "That is a lot of lookups from one place in one go. Give it a minute and ask again.";
-  }
+/**
+ * The line under the key, printed ONLY where words carry a fact the layout cannot show. A found
+ * answer's blocks already show themselves — one block is visibly one recording, two are visibly
+ * two — so a line restating the count is the Recap Tell and renders nothing. What earns a line:
+ *
+ *   · the miss — a key matching nothing must not render as a blank page, so the honest nothing is
+ *     said in the receipt's own words;
+ *   · the spent dials — the reader has to be told the page is withholding, not empty;
+ *   · the unruled plural — the blocks cannot show whether the list is ranked or deliberate, and
+ *     the ruling is genuinely Fluncle's act, so this is the page's one line with a doer. It is
+ *     said here once, over the answer it belongs to, rather than repeated per block.
+ */
+function IntroLine({ data }: { data: IdentityPageData }) {
+  const line =
+    data.status === "limited"
+      ? "That is a lot of lookups from one place in one go. Give it a minute and ask again."
+      : data.status === "missing"
+        ? "Nothing on file under this identifier."
+        : data.envelope.recordings.some((recording) => recording.relation === "ambiguous")
+          ? "Fluncle has not ruled between these recordings."
+          : undefined;
 
-  if (data.status === "missing") {
-    return "Fluncle has nothing that answers to this identifier.";
-  }
-
-  const count = data.envelope.recordings.length;
-
-  if (count === 1) {
-    return "One recording answers to this identifier.";
-  }
-
-  // Ambiguity belongs to the ANSWER, not to any one block in it, so it is said here once rather
-  // than repeated over every recording below.
-  const unruled = data.envelope.recordings.some((recording) => recording.relation === "ambiguous");
-
-  return unruled
-    ? `${count} recordings answer to this identifier, and Fluncle has not ruled between them.`
-    : `${count} recordings answer to this identifier.`;
+  return line ? <p className="log-index-intro">{line}</p> : undefined;
 }

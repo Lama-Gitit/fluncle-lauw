@@ -127,6 +127,10 @@ describe("the identity answer", () => {
     expect(html).toContain('href="/log/004.7.2I"');
     expect(html).toContain("fluncle://004.7.2I");
     expect(html).not.toContain("identity-title--unlit");
+    // A found answer carries NO intro line: one block is visibly one recording, and a sentence
+    // restating the count is the Recap Tell. Words under the key are reserved for the miss, the
+    // spent dials, and the unruled plural — the facts the layout cannot show.
+    expect(html).not.toContain("log-index-intro");
     // The Spotify link SERVES as the hop, never the raw platform URL (RFC ruling 7).
     expect(html).toContain('href="https://www.fluncle.com/out/spotify/track-1"');
     expect(html).toContain("Listen on Spotify");
@@ -377,10 +381,9 @@ describe("the identity answer", () => {
 
     // Ambiguity is a property of the ANSWER, so it is stated once in the opening line rather than
     // repeated over every block; only the duplicate verdict, which is about one row, renders below.
-    expect(html).toContain(
-      "2 recordings answer to this identifier, and Fluncle has not ruled between them.",
-    );
-    expect(html.match(/has not ruled between them/g)).toHaveLength(1);
+    // No count rides along: two blocks are visibly two blocks, and only the ruling needs words.
+    expect(html).toContain("Fluncle has not ruled between these recordings.");
+    expect(html.match(/has not ruled between these recordings/g)).toHaveLength(1);
     // The same status vocabulary the `duplicate` refusal carries, said at block scale.
     expect(html).toContain("Held as a duplicate of");
     expect(html).toContain('href="/identity/track-1"');
@@ -389,7 +392,7 @@ describe("the identity answer", () => {
   it("answers an unknown identifier honestly instead of erroring", async () => {
     const html = await renderPage({ key: "GBXXX0000000", kind: "isrc", status: "missing" });
 
-    expect(html).toContain("Fluncle has nothing that answers to this identifier.");
+    expect(html).toContain("Nothing on file under this identifier.");
     expect(html).toContain("GBXXX0000000");
     // No invitation to send the recording in: a wrong guess must never seed the crew's triage
     // queue, which is why the op 404s a stray key without a submission affordance too.
