@@ -4,7 +4,7 @@
     "agent-orchestration": {
       "source": "packages/skills/agent-orchestration",
       "sourceType": "local",
-      "computedHash": "650ee8c7f137f333a24287941f66e9c22284d704887983d9bfc38964f9d79a4c"
+      "computedHash": "9490dd61f3f6de5f638a97d1029b65004bf7b5fec04447d102837097a081fdd2"
     },
     "ai-seo": {
       "source": "coreyhaines31/marketingskills",
