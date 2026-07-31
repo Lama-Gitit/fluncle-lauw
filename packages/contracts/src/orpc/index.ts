@@ -73,6 +73,7 @@ import { mixtapesContract } from "./mixtapes";
 import { newsletterContract } from "./newsletter";
 import { radioContract } from "./radio";
 import { reachContract } from "./reach";
+import { replicaContract } from "./replica";
 import { searchContract } from "./search";
 import { storiesContract } from "./stories";
 import { submissionsContract } from "./submissions";
@@ -376,6 +377,7 @@ export {
 export { listMixtapes } from "./mixtapes";
 export { type NewsletterBody, subscribeNewsletter } from "./newsletter";
 export { getRadioNowPlaying, getRandomRadioTrack } from "./radio";
+export { getReplicaToken, replicaContract } from "./replica";
 export {
   searchArchive,
   type SearchEntity,
@@ -493,6 +495,7 @@ export const contract = {
   ...newsletterContract,
   ...radioContract,
   ...reachContract,
+  ...replicaContract,
   ...searchContract,
   ...storiesContract,
   ...submissionsContract,
