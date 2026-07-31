@@ -23,6 +23,8 @@ export BUN_BIN="${BUN_BIN:-/usr/local/bin/bun}"
 export CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 AUDIT_DIR="${SCRIPT_DIR}/audit"
+# shellcheck source=./agent-env.sh
+. "${SCRIPT_DIR}/agent-env.sh"
 
 SECRETS_FILE="${AUDIT_SECRETS_FILE:-${HOME:-/opt/data/home}/.fluncle-secrets.env}"
 if [ -r "${SECRETS_FILE}" ]; then
@@ -109,8 +111,12 @@ ${runtime_note}"
     } catch (e) { process.stderr.write("[audit-review] trust-mark skipped: " + e.message + "\n"); }
   ' || log "trust-mark step failed (continuing; prompt rails + PAT scope + review gate still apply)"
 
+  # Strip the box credential set from the child (see ./agent-env.sh). The reviewer reads a PR diff,
+  # which on an audit night is machine-authored — but a diff is still text this process did not
+  # write, and the reviewer holds the same PAT as the author it is reviewing.
+  agent_env_scrub_args "${SECRETS_FILE}"
   log "invoking claude -p (opus) reviewer for PR #${PR_NUM}…"
-  "$(command -v claude)" -p "${prompt}" \
+  FLUNCLE_UNATTENDED=1 env ${AGENT_ENV_SCRUB[@]+"${AGENT_ENV_SCRUB[@]}"} "$(command -v claude)" -p "${prompt}" \
     --model opus \
     --dangerously-skip-permissions \
     >&2 || log "claude -p returned nonzero"

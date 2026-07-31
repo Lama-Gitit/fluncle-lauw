@@ -3,10 +3,13 @@
 //
 // The cron is a HYBRID, exactly like note/observe/audit: the mechanics are deterministic and
 // exactly ONE `claude -p` call owns the code judgment. This module is the deterministic half —
-// it owns EVERY Sentry API call (fetch + resolve + comment) plus the GitHub reads it needs, so
-// the Sentry token NEVER enters the claude process (claude only ever gets the GitHub PAT the
-// audit sweep already uses, to open its fix PRs). The driver `sentry-triage-sweep.sh` calls the
-// subcommands below around the one claude call.
+// it owns EVERY Sentry API call (fetch + resolve + comment) plus the GitHub reads it needs, so the
+// claude process never NEEDS a Sentry credential. Until 2026-07-31 this header claimed it never
+// HELD one either — which was false: the driver sources the shared secrets file with `set -a`, so
+// the whole box credential set was exported into claude's environment regardless of what any
+// argument list said. The driver now scrubs it (`agent-env.sh`), which is what makes the claim
+// true; the claim itself was never a control. The driver calls the subcommands below around the
+// one claude call.
 //
 // SUBCOMMANDS
 //   fetch <ledgerPath> <outFile>   Pull unresolved issues from every project, EXCLUDE the ones
@@ -119,23 +122,61 @@ export function parseLedgerIds(ledger: string): string[] {
   return out;
 }
 
-/** Normalize one raw Sentry issue (the list endpoint's shape) into the compact worklist record. */
+/**
+ * Bound one ATTACKER-WRITABLE string before it is forwarded into an agent's prompt.
+ *
+ * Every field this sweep takes off an issue's `title`, `culprit`, `metadata`, or stack frames is
+ * written by whoever sent the event, and the ingest DSN that lets them send it is a PUBLIC
+ * identifier committed in `apps/web/src/lib/sentry-config.ts`. That is the Agentjacking shape
+ * (Tenet Security, disclosed to Sentry 2026-06-03, declined at the root as "technically not
+ * defensible"), so the untrusted text is a permanent property of this input, not a bug to fix
+ * upstream.
+ *
+ * Be honest about what this can and cannot do. It CANNOT make the text safe: an imperative
+ * sentence is just as legible to a model after the control characters are gone, so nothing here
+ * substitutes for the framing in `sentry-triage-prompt.md` or for the env scrub in `agent-env.sh`.
+ * What it does is remove the cheap structural tricks and the unbounded case:
+ *   • strip C0/C1 controls, so a payload cannot smuggle ANSI escapes or forge line structure;
+ *   • collapse whitespace runs, so a wall of newlines cannot push the operating contract out of
+ *     the model's attention;
+ *   • cap the length, so one crafted issue cannot spend the whole context window.
+ */
+export function sanitizeUntrusted(value: unknown, max = 300): string {
+  if (typeof value !== "string") {
+    return "";
+  }
+  const stripped = value
+    // oxlint-disable-next-line no-control-regex
+    .replace(/[\u0000-\u001f\u007f-\u009f]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  return stripped.length <= max ? stripped : `${stripped.slice(0, max)}… [truncated]`;
+}
+
+/**
+ * Normalize one raw Sentry issue (the list endpoint's shape) into the compact worklist record.
+ *
+ * The split below is deliberate: `id`, `shortId`, `permalink`, and the two timestamps are assigned
+ * by Sentry and are the fields the loop's correctness depends on, so they keep a plain type check.
+ * Everything a reporter writes goes through `sanitizeUntrusted` with a cap sized to how much of it
+ * is ever useful for locating a bug.
+ */
 export function compactIssue(raw: Record<string, unknown>, project: string): CompactIssue {
   const meta = (raw.metadata ?? {}) as Record<string, unknown>;
   const asStr = (v: unknown, fallback = ""): string => (typeof v === "string" ? v : fallback);
   return {
     count: Number(raw.count ?? 0),
-    culprit: asStr(raw.culprit),
+    culprit: sanitizeUntrusted(raw.culprit, 200),
     firstSeen: asStr(raw.firstSeen),
     id: asStr(raw.id),
     lastSeen: asStr(raw.lastSeen),
-    level: asStr(raw.level, "error"),
+    level: sanitizeUntrusted(raw.level, 32) || "error",
     permalink: asStr(raw.permalink),
     project,
     shortId: asStr(raw.shortId),
-    title: asStr(raw.title),
-    type: asStr(meta.type),
-    value: asStr(meta.value ?? raw.culprit),
+    title: sanitizeUntrusted(raw.title, 200),
+    type: sanitizeUntrusted(meta.type, 100),
+    value: sanitizeUntrusted(meta.value ?? raw.culprit, 500),
   };
 }
 

@@ -46,7 +46,7 @@ FROM nousresearch/hermes-agent@sha256:f7b35053268f532f98955195c909f15a230470fbcb
 # rebake that bakes this in.
 # One layer, lists cleaned, no recommends.
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends ffmpeg unzip openssh-client dnsutils fonts-dejavu-core libchromaprint-tools \
+  && apt-get install -y --no-install-recommends ffmpeg unzip openssh-client dnsutils fonts-dejavu-core libchromaprint-tools jq \
   && rm -rf /var/lib/apt/lists/*
 
 # Bake a PINNED yt-dlp (the fluncle-capture sweep's fetcher) in its OWN EARLY layer — above the

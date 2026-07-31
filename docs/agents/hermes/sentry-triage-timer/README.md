@@ -28,9 +28,13 @@ across DST.
 ## How it works (the loop is stateless — GitHub is the store)
 
 The deterministic `sentry-triage-sweep.ts` owns every Sentry API call; the one `claude -p` owns the
-code judgment. The two never share a token: the Sentry token stays in the driver, claude only gets
-the GitHub PAT (to open PRs). The loop needs no on-box state because GitHub holds it, via the PR-body
-markers:
+code judgment. The two do not share a token, and since 2026-07-31 that is **enforced rather than
+asserted**: the driver builds an `env -u` list from the secrets file's own key names
+(`../scripts/agent-env.sh`) and strips every one of them from the child except `CLAUDE_CODE_OAUTH_TOKEN`
+and `GH_TOKEN`. Deriving the list from the file means a key added later is scrubbed with no second
+list to maintain. Read the honest limit there too: the agent opens its own PRs, so the PAT's
+capability is inherent and narrowing it is a GitHub-side change (see _Auto-merge posture_ below).
+The loop needs no on-box state because GitHub holds it, via the PR-body markers:
 
 - A **fix PR** body carries `Sentry-Issue: <id>` lines. On a later night, `reconcile` resolves those
   issues **once the PR has merged to `main`** — we resolve only what actually landed, never a blanket
@@ -51,7 +55,16 @@ markers:
 
 By default a fix lands as an **open PR on a `sentry-triage/` branch** for the operator to merge — a
 merge to `main` is a production deploy, and this cron has no second reviewer behind it (unlike the
-audit's 05:00 reviewer). To mirror the audit's "merge on green" posture without a second cron, set
+audit's 05:00 reviewer).
+
+> **Know what that default is and is not.** It is the driver declining to ask for auto-merge, plus a
+> prompt instruction telling the agent to stop at the PR. It is **not** a server-side permission: the
+> PAT that opens the PR is the same credential that could merge it, so the posture holds only while
+> the repo's own required-review and required-check settings enforce it. Treat "the operator reviews
+> it" as a property of branch protection, never of this cron. The audited state of those settings,
+> and the toggles that close any gap, live in the private companion repo.
+
+To mirror the audit's "merge on green" posture without a second cron, set
 `SENTRY_TRIAGE_AUTOMERGE=1` in the box env: claude then enables GitHub auto-merge on each fix PR
 (`gh pr merge --squash --auto`), so a green `deploy:gate` merges it hands-off. That requires the repo
 to have auto-merge + required-checks branch protection enabled; if not, the command errors harmlessly

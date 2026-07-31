@@ -30,6 +30,8 @@ export CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 AUDIT_DIR="${SCRIPT_DIR}/audit"
+# shellcheck source=./agent-env.sh
+. "${SCRIPT_DIR}/agent-env.sh"
 
 # Provider creds (CLAUDE_CODE_OAUTH_TOKEN, FLUNCLE_AUDIT_GITHUB_PAT, FLUNCLE_BING_WEBMASTER_API_KEY)
 # arrive via the 0600 op-synced shared file, exactly like newsletter/observe. GSC is a separate
@@ -156,8 +158,14 @@ $(cat "${prompt_file}")"
     } catch (e) { process.stderr.write("[audit-sweep] trust-mark skipped: " + e.message + "\n"); }
   ' || log "trust-mark step failed (continuing; prompt rails + PAT scope + review still gate)"
 
+  # Strip the box credential set from the child (see ./agent-env.sh). This sweep's input is the repo
+  # rather than attacker-written text, so the exposure is smaller than sentry-triage's — but the
+  # `surfaces-seo` night feeds it Google Search Console QUERY strings, which are typed by strangers,
+  # and the scrub costs nothing on the other six nights. GOOGLE_APPLICATION_CREDENTIALS is named
+  # explicitly because line 44 exports it independently of the secrets file.
+  agent_env_scrub_args "${SECRETS_FILE}" GOOGLE_APPLICATION_CREDENTIALS
   log "invoking claude -p (opus) for ${DOMAIN}…"
-  "$(command -v claude)" -p "${prompt}" \
+  FLUNCLE_UNATTENDED=1 env ${AGENT_ENV_SCRUB[@]+"${AGENT_ENV_SCRUB[@]}"} "$(command -v claude)" -p "${prompt}" \
     --model opus \
     --dangerously-skip-permissions \
     >&2 || log "claude -p returned nonzero"
