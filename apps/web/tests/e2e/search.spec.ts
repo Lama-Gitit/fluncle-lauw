@@ -102,9 +102,12 @@ test("search dialog resolves the deterministic tiers over the seeded archive", a
   await expect(page.getByRole("option", { name: new RegExp(FIRST_FINDING_TITLE) })).toBeVisible();
 
   // Tier 2, the exact entity: the seeded artist comes back as a JUMP TARGET under
-  // its own heading — the thing searched for, offered as somewhere to go.
+  // its own heading — the thing searched for, offered as somewhere to go. EXACT, because
+  // the non-exact form also matches any track ROW crediting the artist once the FTS tier
+  // resolves — a race that has flaked this assertion twice (2026-07-29, 2026-07-31) as a
+  // strict-mode violation when both options render.
   await typeQuery(page, SEEDED_ARTIST_NAME);
-  await expect(page.getByRole("option", { name: SEEDED_ARTIST_NAME })).toBeVisible();
+  await expect(page.getByRole("option", { exact: true, name: SEEDED_ARTIST_NAME })).toBeVisible();
 
   // Tier 1, the coordinate: it names exactly one finding, and comes back AS that
   // finding (a row), never as a rendering of the URL it is about to visit.

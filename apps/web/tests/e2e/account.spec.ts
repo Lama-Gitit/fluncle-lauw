@@ -83,12 +83,12 @@ test("a new account joins, saves a finding, sees it on /account, and loses it on
   await expect(emailField).toBeVisible();
 
   // ── 3. JOIN THE CREW ────────────────────────────────────────────────────────
-  // NOTE (proven, not assumed): sign-up fires a `user.create.after` hook that both
-  // stamps the crew number and auto-subscribes the address to the newsletter via
-  // Resend, and Better Auth also mails a verification link on sign-up. The dummy e2e
-  // env carries NO Resend credentials, so BOTH of those outbound legs fail — and the
-  // account is still created and signed in. That is the point of asserting it here:
-  // a Resend outage must never be able to block a sign-up.
+  // NOTE (proven, not assumed): sign-up fires a `user.create.after` hook that stamps
+  // the crew number, auto-subscribes the address to the newsletter via Resend, and
+  // sends a privacy-safe operator alert via Discord. Better Auth also mails a
+  // verification link on sign-up. The dummy e2e env carries neither outbound service's
+  // credentials, so those legs no-op or fail safely — and the account is still created
+  // and signed in. An integration outage must never be able to block a sign-up.
   await emailField.fill(email);
   await page.getByLabel("Username", { exact: true }).fill(username);
   await page.getByLabel("Password", { exact: true }).fill(PASSWORD);

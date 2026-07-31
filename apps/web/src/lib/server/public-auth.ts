@@ -7,6 +7,7 @@ import { bearer, deviceAuthorization } from "better-auth/plugins";
 import { username } from "better-auth/plugins/username";
 import * as schema from "../../db/schema";
 import { getDb, getDrizzleDb, typedRow } from "./db";
+import { notifyDiscordSignup } from "./discord-alert";
 import { jsonError, readOptionalEnv } from "./env";
 import { sendPasswordResetEmail, sendVerificationEmail } from "./resend";
 
@@ -302,8 +303,9 @@ export function createPublicAuthOptions(
     // The enlistment side effects, fired ONCE per new account (the account-redesign
     // brief). `user.create.after` runs for BOTH email/password sign-up AND social
     // (Google) sign-up — the latter lands here via the OAuth `/callback/:id` create
-    // path, so both share this one seam. It (1) stamps the crew number (ruling #1) and
-    // (2) auto-subscribes the email to the newsletter (ruling #5). Crew-number
+    // path, so both share this one seam. It (1) stamps the crew number (ruling #1),
+    // (2) auto-subscribes the email to the newsletter (ruling #5), and (3) tells the
+    // operator's Discord alert channel that the crew grew. Crew-number
     // assignment is wrapped so a race it could not win never fails the sign-up — the
     // one-time backfill recovers any unstamped row — and auto-subscribe is best-effort
     // by construction (a Resend fault is swallowed, never rethrown).
@@ -311,13 +313,20 @@ export function createPublicAuthOptions(
       user: {
         create: {
           after: async (createdUser, hookContext) => {
+            let crewNumber: number | undefined;
+
             try {
-              await assignCrewNumber(createdUser.id);
+              crewNumber = await assignCrewNumber(createdUser.id);
             } catch (error) {
               console.error("crew-number assignment failed", error);
             }
 
-            await autoSubscribeAtSignup(createdUser.email, hookContext);
+            await Promise.all([
+              autoSubscribeAtSignup(createdUser.email, hookContext),
+              notifyDiscordSignup({ crewNumber }).catch((error: unknown) => {
+                console.error("Discord signup alert failed", error);
+              }),
+            ]);
           },
         },
       },

@@ -1,14 +1,14 @@
 import { type Client } from "@libsql/client";
 import { drizzle } from "drizzle-orm/libsql";
-import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import * as schema from "../../db/schema";
 import { createIntegrationDb } from "./integration-db";
 import { createIntegrationAuth } from "./integration-auth";
 
-// End-to-end proof that the `user.create.after` sign-up hook fires and does its two
-// jobs (the account-redesign brief): stamp the crew number (ruling #1) and auto-
-// subscribe the email to the newsletter (ruling #5) — best-effort, never failing the
-// sign-up. We build a REAL better-auth instance over an in-memory libSQL DB with the
+// End-to-end proof that the `user.create.after` sign-up hook fires and does its three
+// jobs: stamp the crew number (account-redesign ruling #1), auto-subscribe the email
+// to the newsletter (ruling #5), and alert the operator in Discord — best-effort,
+// never failing the sign-up. We build a REAL better-auth instance over an in-memory libSQL DB with the
 // real migrations, and drive `auth.api.signUpEmail` so the actual create path runs.
 //
 // The Google/social path uses this SAME hook (it lands via the OAuth `/callback/:id`
@@ -23,6 +23,11 @@ let db: Client;
 
 // Spy on the only outbound the subscribe path makes, so nothing hits the network.
 const addContactToSegment = vi.fn<(email: string) => Promise<void>>();
+const notifyDiscordSignup = vi.fn<({ crewNumber }: { crewNumber?: number }) => Promise<void>>();
+
+vi.mock("./discord-alert", () => ({
+  notifyDiscordSignup: (alert: { crewNumber?: number }) => notifyDiscordSignup(alert),
+}));
 
 vi.mock("./resend", async (importOriginal) => {
   const actual = await importOriginal<typeof import("./resend")>();
@@ -68,8 +73,13 @@ beforeAll(async () => {
   db = await createIntegrationDb();
 });
 
+beforeEach(() => {
+  notifyDiscordSignup.mockResolvedValue(undefined);
+});
+
 afterEach(() => {
   addContactToSegment.mockReset();
+  notifyDiscordSignup.mockReset();
 });
 
 afterAll(() => {
@@ -90,6 +100,10 @@ describe("sign-up hooks", () => {
     expect(await crewNumberOfEmail("newjunglist@example.com")).toBeGreaterThanOrEqual(1);
     // Ruling #5: its email went to the newsletter segment.
     expect(addContactToSegment).toHaveBeenCalledWith("newjunglist@example.com");
+    // The operator hears about the signup without the alert receiving account PII.
+    expect(notifyDiscordSignup).toHaveBeenCalledWith({
+      crewNumber: await crewNumberOfEmail("newjunglist@example.com"),
+    });
   });
 
   it("never fails the sign-up when the newsletter subscribe faults", async () => {
@@ -105,7 +119,22 @@ describe("sign-up hooks", () => {
       }),
     ).resolves.toBeDefined();
 
-    // And the crew number was still stamped: the two side effects are independent.
+    // And the crew number was still stamped: the side effects are independent.
     expect(await crewNumberOfEmail("resilient@example.com")).toBeGreaterThanOrEqual(1);
+  });
+
+  it("never fails the sign-up when the Discord alert faults", async () => {
+    notifyDiscordSignup.mockRejectedValueOnce(new Error("Discord exploded"));
+
+    const auth = buildAuth();
+
+    await expect(
+      auth.api.signUpEmail({
+        body: { email: "quiet@example.com", name: "Quiet", password: "amenbreak99" },
+      }),
+    ).resolves.toBeDefined();
+
+    expect(await crewNumberOfEmail("quiet@example.com")).toBeGreaterThanOrEqual(1);
+    expect(addContactToSegment).toHaveBeenCalledWith("quiet@example.com");
   });
 });

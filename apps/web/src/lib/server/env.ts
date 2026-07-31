@@ -169,6 +169,10 @@ const envKeys = [
   "TELEGRAM_BOT_TOKEN",
   "TELEGRAM_CHANNEL_ID",
   "DISCORD_WEBHOOK_URL",
+  // Operator-only event alerts. Distinct from DISCORD_WEBHOOK_URL, which posts
+  // public track submissions to the crew channel. Optional: alert producers no-op
+  // when the Worker secret is absent.
+  "DISCORD_ALERT_WEBHOOK",
   // Bluesky (AT Protocol) publish side-channel (lib/server/bluesky.ts). The
   // handle/identifier + an app password (NOT the account password) for
   // @fluncle.com (a leading "@" in the stored value is fine — bluesky.ts strips
