@@ -1,10 +1,14 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { logPageUrl, siteUrl } from "../lib/fluncle-links";
+import { bestAlbumCoverUrl } from "../lib/media";
 import { mixtapeCoverUrl } from "../lib/mixtapes";
 import { parseArtistsJson } from "../lib/server/artists";
 import { getDb, typedRows } from "../lib/server/db";
 
 type TrackRow = {
+  album_image_key: string | null;
+  album_image_state: string | null;
+  album_image_updated_at: string | null;
   album_image_url: string | null;
   artists_json: string;
   item_type: "finding" | "mixtape";
@@ -36,11 +40,16 @@ export const Route = createFileRoute("/feed.json")({
               findings.log_id,
               tracks.spotify_url,
               tracks.album_image_url,
+              albums.image_key as album_image_key,
+              albums.image_state as album_image_state,
+              albums.image_updated_at as album_image_updated_at,
               tracks.title,
               tracks.artists_json,
               findings.note,
               findings.added_at
-            from findings join tracks on tracks.track_id = findings.track_id
+            from findings
+              join tracks on tracks.track_id = findings.track_id
+              left join albums on albums.id = tracks.album_id
             union all
             select
               'mixtape' as item_type,
@@ -48,6 +57,9 @@ export const Route = createFileRoute("/feed.json")({
               log_id,
               null as spotify_url,
               null as album_image_url,
+              null as album_image_key,
+              null as album_image_state,
+              null as album_image_updated_at,
               title,
               '["Fluncle"]' as artists_json,
               note,
@@ -72,13 +84,20 @@ export const Route = createFileRoute("/feed.json")({
           // owns). Fall back to Spotify only when no coordinate has been minted yet.
           const url = row.log_id ? logPageUrl(row.log_id) : (row.spotify_url ?? siteUrl);
           // A mixtape's cover renders on the fly from its Log ID; a finding carries
-          // its album cover.
+          // its album cover — the OWNED master through Cloudflare Images where the album
+          // has resolved one, the stored Spotify URL as the floor (REF-05: this feed was
+          // the one surface still hotlinking Spotify unconditionally).
           const image =
             row.item_type === "mixtape"
               ? row.log_id
                 ? mixtapeCoverUrl(row.log_id)
                 : undefined
-              : (row.album_image_url ?? undefined);
+              : bestAlbumCoverUrl({
+                  imageKey: row.album_image_key,
+                  imageState: row.album_image_state,
+                  imageUpdatedAt: row.album_image_updated_at,
+                  spotifyUrl: row.album_image_url,
+                });
 
           const item: {
             content_text: string;
