@@ -118,15 +118,14 @@ if (FREE_TEAM) {
   config.plugins.push(withFreeTeamSigning);
 }
 
-// SPIKE_LIBSQL=1 swaps expo-sqlite's ENGINE at build time: the podspec excludes the
-// whole libSQL implementation (SQLiteModuleLibSQL.swift + libsql.xcframework) unless the
-// plugin writes expo.sqlite.useLibSQL=true at prebuild — and with it, SQLiteModule.swift
-// and the bundled sqlite3 are excluded instead, so the WHOLE app's SQLite (kv-store
-// included) rides libSQL in that build. Spike/dev builds only (the slice-2 syncLibSQL
-// gate, docs/planning/offline-first-mobile-research.md); store builds stay on the
-// default engine until slice 2 is ruled buildable.
-if (process.env.SPIKE_LIBSQL === "1") {
-  config.plugins.push(["expo-sqlite", { useLibSQL: true }]);
-}
+// The libSQL ENGINE, unconditional (the flip, ruled 2026-07-31): the expo-sqlite config
+// plugin writes expo.sqlite.useLibSQL=true at prebuild, and the podspec swaps the whole
+// implementation — SQLiteModule.swift + bundled sqlite3 out, SQLiteModuleLibSQL.swift +
+// libsql.xcframework in — so ALL of the app's SQLite (the kv-store device stores included)
+// rides libSQL in every build. This is what lets the device replica activate for real
+// users. Build trap: flipping this line rewrites Podfile.properties.json WITHOUT dirtying
+// the Podfile checksum, so `expo run:ios` silently rebuilds the old engine — force
+// `pod install` in ios/ after any change here.
+config.plugins.push(["expo-sqlite", { useLibSQL: true }]);
 
 module.exports = config;
