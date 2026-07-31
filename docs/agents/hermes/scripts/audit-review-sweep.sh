@@ -114,7 +114,8 @@ ${runtime_note}"
   # Strip the box credential set from the child (see ./agent-env.sh). The reviewer reads a PR diff,
   # which on an audit night is machine-authored — but a diff is still text this process did not
   # write, and the reviewer holds the same PAT as the author it is reviewing.
-  agent_env_scrub_args "${SECRETS_FILE}"
+  # Declares GH_TOKEN — the reviewer reads the PR, comments, and holds it open or lets it merge.
+  agent_env_scrub_args --secrets "${SECRETS_FILE}" --allow GH_TOKEN
   log "invoking claude -p (opus) reviewer for PR #${PR_NUM}…"
   FLUNCLE_UNATTENDED=1 env ${AGENT_ENV_SCRUB[@]+"${AGENT_ENV_SCRUB[@]}"} "$(command -v claude)" -p "${prompt}" \
     --model opus \

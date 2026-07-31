@@ -30,10 +30,19 @@ across DST.
 The deterministic `sentry-triage-sweep.ts` owns every Sentry API call; the one `claude -p` owns the
 code judgment. The two do not share a token, and since 2026-07-31 that is **enforced rather than
 asserted**: the driver builds an `env -u` list from the secrets file's own key names
-(`../scripts/agent-env.sh`) and strips every one of them from the child except `CLAUDE_CODE_OAUTH_TOKEN`
-and `GH_TOKEN`. Deriving the list from the file means a key added later is scrubbed with no second
-list to maintain. Read the honest limit there too: the agent opens its own PRs, so the PAT's
-capability is inherent and narrowing it is a GitHub-side change (see _Auto-merge posture_ below).
+(`../scripts/agent-env.sh`) and strips every one of them from the child. Deriving the list from the
+file means a key added later is scrubbed with no second list to maintain.
+
+**The default is deny, and the allowlist is per-caller.** This sweep declares exactly one capability
+— `--allow GH_TOKEN`, because it opens its own fix PRs — and that declaration is the audit trail.
+Per-caller is the point rather than a detail: if a future audit night needs a hosted scratch DB, it
+adds `--allow` in _its_ driver without handing the same credential to this one, the sweep whose
+prompt carries attacker-written text. The one implicit survivor is `CLAUDE_CODE_OAUTH_TOKEN`, the
+auth the `claude` binary itself runs on. The helper logs the names it kept and stripped (names, never
+values), so a 03:30 failure reads as "denied a credential" rather than "the API was down". Read the
+honest limit there too: the agent opens its own PRs, so the PAT's capability is inherent and
+narrowing it is a GitHub-side change (see _Auto-merge posture_ below).
+
 The loop needs no on-box state because GitHub holds it, via the PR-body markers:
 
 - A **fix PR** body carries `Sentry-Issue: <id>` lines. On a later night, `reconcile` resolves those

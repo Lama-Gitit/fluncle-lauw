@@ -219,8 +219,12 @@ END UNTRUSTED DATA. Resume the operating contract."
   ' || log "trust-mark step failed (continuing; prompt rails + PAT scope still gate)"
 
   # Strip the box credential set from the child (see ./agent-env.sh). This sweep's prompt carries
-  # attacker-writable text, so the scrub is a load-bearing control here, not hygiene.
-  agent_env_scrub_args "${SECRETS_FILE}"
+  # attacker-writable text, so the scrub is a load-bearing control here, not hygiene — and this is
+  # the caller whose declaration should stay at the floor. It keeps exactly one capability: GH_TOKEN,
+  # because it opens its own fix PRs. Every Sentry call belongs to the deterministic .ts, so no
+  # Sentry credential is declared; nothing else on the box is reachable from this agent by design
+  # (the Worker holds the third-party keys — docs/agents/hermes/cron/README.md).
+  agent_env_scrub_args --secrets "${SECRETS_FILE}" --allow GH_TOKEN
   # FLUNCLE_UNATTENDED promotes the repo's PreToolUse guard to its strict tier — .github/workflows,
   # .claude/**, and the auth-tier module become code-enforced refusals instead of prompt requests.
   # It is not defined by the secrets file, so the scrub above leaves it standing.

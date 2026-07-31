@@ -163,7 +163,13 @@ $(cat "${prompt_file}")"
   # `surfaces-seo` night feeds it Google Search Console QUERY strings, which are typed by strangers,
   # and the scrub costs nothing on the other six nights. GOOGLE_APPLICATION_CREDENTIALS is named
   # explicitly because line 44 exports it independently of the secrets file.
-  agent_env_scrub_args "${SECRETS_FILE}" GOOGLE_APPLICATION_CREDENTIALS
+  # Declares GH_TOKEN (it opens the nightly PR) and nothing else. Note this makes the db-query-shape
+  # prompt's own claim true — it tells the auditor "Turso Cloud credentials are not on this box"
+  # while the shared file carries the read-only pair for backup-sweep. If a future night genuinely
+  # needs a hosted scratch DB, add `--allow` HERE; because the allowlist is per-caller, doing so
+  # does not hand the same credential to sentry-triage.
+  agent_env_scrub_args --secrets "${SECRETS_FILE}" --allow GH_TOKEN \
+    --scrub GOOGLE_APPLICATION_CREDENTIALS
   log "invoking claude -p (opus) for ${DOMAIN}…"
   FLUNCLE_UNATTENDED=1 env ${AGENT_ENV_SCRUB[@]+"${AGENT_ENV_SCRUB[@]}"} "$(command -v claude)" -p "${prompt}" \
     --model opus \
