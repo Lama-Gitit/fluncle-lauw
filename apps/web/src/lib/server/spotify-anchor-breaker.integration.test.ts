@@ -261,16 +261,31 @@ describe("the breaker RELEASES", () => {
   it("re-opens the anchor-search gate once the cooldown elapses, with no operator", async () => {
     const { anchorSpotifySearchAllowed, setAnchorSpotifySearchEnabled } =
       await import("./anchor-spotify-search");
-    const { SPOTIFY_ANCHOR_BREAKER_COOLDOWN_MS, SPOTIFY_ANCHOR_BREAKER_MAX_FAILURES } =
-      await import("./spotify-anchor-breaker");
+    const {
+      SPOTIFY_ANCHOR_BREAKER_COOLDOWN_MS,
+      SPOTIFY_ANCHOR_BREAKER_MAX_FAILURES,
+      SPOTIFY_ANCHOR_BREAKER_TRIPPED_AT_KEY,
+    } = await import("./spotify-anchor-breaker");
+    const { setSetting } = await import("./settings");
 
     await setAnchorSpotifySearchEnabled(true);
     stubSpotify({ throttle: true });
 
-    const trippedAtMs = Date.now();
-
     await driveThrottledCalls(SPOTIFY_ANCHOR_BREAKER_MAX_FAILURES);
     expect(await anchorSpotifySearchAllowed(NON_FRIDAY)).toBe(false);
+
+    // The real 429s above stamped the trip from the REAL clock, so a cooldown measured off it lands
+    // the release probe at a wall-clock-dependent weekday/hour — and the gate's FIRST clause is the
+    // Friday 06:00–09:00 Amsterdam refresh window. Run this suite in the ~3h before that window on a
+    // Friday and `released` falls inside it, so the gate answers false for a reason that has nothing
+    // to do with the breaker and the test fails on the clock rather than on a regression.
+    // Re-stamp the trip onto NON_FRIDAY (the frozen Wednesday the assertions above already use) so
+    // both probes are pinned outside the window. The trip itself is still driven by real 429s
+    // through the real recorder — only the instant it is measured from becomes deterministic, and
+    // the release verdict reads exactly this stored stamp.
+    await setSetting(SPOTIFY_ANCHOR_BREAKER_TRIPPED_AT_KEY, NON_FRIDAY.toISOString());
+
+    const trippedAtMs = NON_FRIDAY.getTime();
 
     // `anchorSpotifySearchAllowed` takes `now`, so the cooldown is driven without touching timers.
     const stillCooling = new Date(trippedAtMs + SPOTIFY_ANCHOR_BREAKER_COOLDOWN_MS - 60_000);
