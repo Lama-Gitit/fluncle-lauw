@@ -217,9 +217,13 @@ describe("backfillDeezer — the ledger law", () => {
     expect(result.unvouchable).toEqual(["cat00000000000000000011"]);
 
     const track = await readTrack("cat00000000000000000011");
+    // No RECEIPT moves (no attempt stamp, no id) — but the can't-conclude streak does, or the
+    // `attempted_at is null` worklist re-serves the same unvouchable rows every tick forever
+    // (the 2026-08-01 starvation loop, observed live). Three streaks and the row leaves the
+    // budget via the `failures < cap` gate, its receipt honestly still "Not checked yet".
     expect(track?.backfill_deezer_attempted_at).toBeNull();
     expect(Number(track?.backfill_deezer_attempts)).toBe(0);
-    expect(Number(track?.backfill_deezer_failures)).toBe(0);
+    expect(Number(track?.backfill_deezer_failures)).toBe(1);
     expect(track?.deezer_track_id).toBeNull();
   });
 
