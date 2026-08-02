@@ -16,13 +16,16 @@ slugify(tracks.label) = labels.slug
 
 **The slug is the display identity and the fallback fold; the MusicBrainz label MBID (`mb_label_id`) is the stable fold key for a DISCOVERED label** — the label twin of the release-group MBID the album entity folds on. `slugify` cannot fold `Med School` and `Medschool` (they slug apart), so a crawler that minted a discovered label by slug alone would mint those two spellings as separate labels. Folding on the MBID collapses them: a UNIQUE index on `mb_label_id` (NULLs distinct — most rows carry none) makes `where mb_label_id = ?` a connect-or-create the crawler resolves BEFORE the slug path. When a caller carries an MBID and the resolved/minted row has none yet, it is **adopted fill-empty-only** (`where mb_label_id is null`), so a publish-minted label and the crawler's later discovery collapse into one row instead of duplicating, and a row already folded on a different MBID is never rewritten. The alias layer (below) stays the secondary defense for a NON-MusicBrainz source (Apple's `recordLabel`) and for the fold `slugify` can't do on its own.
 
-| Column        | What it is                                                                                                                   |
-| ------------- | ---------------------------------------------------------------------------------------------------------------------------- |
-| `slug`        | The display identity and the join key (unique). Minted by `slugify(name)`. Also the fold key when no MBID exists.            |
-| `mb_label_id` | The MusicBrainz label MBID — the stable fold key for a discovered label (UNIQUE, NULL for a publish-minted / pre-crawl row). |
-| `name`        | The display name — the first raw spelling seen for that slug.                                                                |
-| `seed_state`  | `enabled` \| `disabled` \| `undecided`. **Crawl scope, never storage** (below).                                              |
-| `ruled_at`    | When a HUMAN last ruled. NULL = no operator has ruled it (a machine default, or the one-time bootstrap).                     |
+| Column             | What it is                                                                                                                                                                                  |
+| ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `slug`             | The display identity and the join key (unique). Minted by `slugify(name)`. Also the fold key when no MBID exists.                                                                           |
+| `mb_label_id`      | The MusicBrainz label MBID — the stable fold key for a discovered label (UNIQUE, NULL for a publish-minted / pre-crawl row).                                                                |
+| `name`             | The display name — the first raw spelling seen for that slug.                                                                                                                               |
+| `seed_state`       | `enabled` \| `disabled` \| `undecided`. **Crawl scope, never storage** (below).                                                                                                             |
+| `ruled_at`         | When a HUMAN last ruled. NULL = no operator has ruled it (a machine default, or the one-time bootstrap).                                                                                    |
+| `scope_changed_at` | The crawl re-arm watermark — stamped on enable, on any artist-rule change for the label, and by an explicit `--rewalk`. Never touched by reads; `ruled_at` is never touched by rule writes. |
+
+A label's **artist exceptions** live in the `artist_rules` table (`label_id` = this label; NULL = a global rule): `verdict: allow | block`, keyed on the artist's MB MBID with a write-time-resolved Spotify bridge for the freshness tap. The exception model is the crawler's (three-layer verdict, FIRST-credit quantifier — [catalogue-crawler.md](./catalogue-crawler.md#the-boundary-gate-enabled-label-storage--graph-distance-discovery)); this document owns what the rows MEAN: a block carves an act out of an enabled label ("take the label, except them"), an allow carves an act into a disabled one ("skip the label, but always take them"). A label **merge never unions rules**: the survivor keeps its own, the loser's are dropped and reported (`droppedRules`) for deliberate re-authoring.
 
 Derive a label's finding count with a grouped read; do not store it.
 
@@ -35,6 +38,10 @@ This is the ruling, and it is the whole point of the control. **`seed_state` ans
 - **`undecided`** is where a brand-new label enters: **never silently crawled, never silently dropped.** It surfaces in the `/admin` attention queue until a human rules on it.
 
 `seed_state` affects crawl acquisition only. It does not affect storage, rendering, indexability, or sitemap membership.
+
+The same axis governs artist rules, so the restatement covers both: **a ruling and its artist rules govern what Fluncle _acquires_ next — what the crawler seeds from, what it takes, and what audio gets bought. Nothing ever changes what is already stored.** Removing already-stored content is the fluncle-catalogue-prune skill's job, a separate deliberate act.
+
+**Prefer an existing MB entity over artist rules when the boundary is a product line.** Some labels already carry the granularity as MB imprint children (Med School under Hospital; 3 Beat Breaks under 3 Beat) — machine-checkable via `?inc=label-rels`. When an imprint child covers the boundary, rule on the child entity; use artist rules when the label is one imprint with mixed output. Never use ℗-holder entities as a mechanism.
 
 ## How a label gets a row
 
@@ -60,10 +67,14 @@ Each ruling row displays the label name plus any MusicBrainz disambiguation, fou
 
 ## The ops (`packages/contracts/src/orpc/admin-labels.ts`)
 
-| op                  | tier                       | path                       |
-| ------------------- | -------------------------- | -------------------------- |
-| `list_labels_admin` | admin (agent-allowed read) | `GET /admin/labels`        |
-| `update_label`      | operator                   | `PATCH /admin/labels/{id}` |
+| op                           | tier                       | path                             |
+| ---------------------------- | -------------------------- | -------------------------------- |
+| `list_labels_admin`          | admin (agent-allowed read) | `GET /admin/labels`              |
+| `update_label`               | operator                   | `PATCH /admin/labels/{id}`       |
+| `list_label_artist_rules`    | admin                      | `GET /admin/labels/{id}/artists` |
+| `replace_label_artist_rules` | operator                   | `PUT /admin/labels/{id}/artists` |
+
+Global artist rules ride their own contract file (`admin-artist-rules.ts`): `list_artist_rules` (admin) plus `add_artist_rule` / `remove_artist_rule` (operator) on `/admin/artist-rules` — they belong to the artist entity's surface ([artist-relationship.md](./artist-relationship.md)), not to any label. `replace_label_artist_rules` is a transactional whole-set swap that resolves each rule's Spotify bridge from the artist's MB url-rels at write and stamps `scope_changed_at`; `update_label` gains `rewalk` for a bare re-walk arm.
 
 `?seedState=enabled` is the crawler's agent-authenticated seed-set read. The `_admin` suffix distinguishes it from the public `list_labels` and `get_label` operations.
 

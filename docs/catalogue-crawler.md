@@ -18,20 +18,26 @@ The crawler's job is to make it dense **without ever letting an uncertified trac
 
 There is **no genre inference**. No MusicBrainz tag, no Discogs style, no BPM band, no classifier. That is ratified, and it is not an omission — it is the design.
 
-The operator already drew the boundary when he ruled on the labels. Every label in the archive carries a `seed_state` (`enabled` / `disabled` / `undecided` — [label-entity.md](./label-entity.md)), and that column now answers two questions: **may the next crawl seed from this label, and may a release on this label be STORED?** Those are distinct, and the split is the whole of this section: **storage is enabled-label-only; the graph walk is a discovery mechanism** that ranges further out to find the next labels to rule on.
+The operator already drew the boundary when he ruled on the labels. Every label in the archive carries a `seed_state` (`enabled` / `disabled` / `undecided` — [label-entity.md](./label-entity.md)), and that column answers two questions: **may the next crawl seed from this label, and may a release on this label be STORED?** Those are distinct, and the split is the whole of this section: **storage is label-ruled with artist-level exceptions; the graph walk is a discovery mechanism** that ranges further out to find the next labels to rule on.
 
-**Storage.** A release's tracks are written into `tracks` only when the label that pressed it is one the operator has `enabled`. The check is a single fold-match at the write chokepoint in `expandRelease` (`isEnabledLabel`, the same aggressive `labelFold` the rest of the crawler uses, against the archive spelling already resolved). A release on a non-enabled label stores **nothing** — no tracks, no album row, no `label_id`/`album_id`/artist edges — even when the walk reached it.
+**Storage** is a three-layer verdict at the write chokepoint in `expandRelease`, resolved per track:
+
+1. **The label default.** `seed_state` decides: an `enabled` label's tracks store, a non-enabled label's tracks do not. The release's label resolves MBID-first against the archive's `labels` rows, falling back to the aggressive `labelFold`; a fold that collides across labels resolves to the default **with all artist rules suppressed** (logged `crawl.scope-ambiguous`) rather than guessing which label's exceptions apply.
+2. **Per-label artist exceptions** (`artist_rules` rows carrying a `label_id`). A **block** drops an act's own records from an enabled label; an **allow** admits an act's billed records from a disabled one.
+3. **Global artist exceptions** (`artist_rules` rows with a NULL `label_id`), consulted only when no per-label rule matches. Same two verdicts, any label.
+
+The quantifier is the **FIRST credited MusicBrainz artist MBID** in both directions — a blocked act's own record is refused while their guest feature on someone else's record stays; an allowed act's billed record is taken while their guest credit is not. A credit with no usable MBID falls to the label default: no rule ever fires on a guess, so the gate fails safe both ways. A release on a non-enabled label with no matching allow stores **nothing** — no tracks, no album row, no `label_id`/`album_id`/artist edges — even when the walk reached it. There is still no genre inference anywhere in this: every rule is an operator ruling (or a triage proposal the operator ratified), keyed on identity.
 
 **Discovery.** The walk still ranges outward by graph distance, because that is how the crawler finds the next labels worth ruling on:
 
-| hop   | what it is                                                    | stored?                                |
-| ----- | ------------------------------------------------------------- | -------------------------------------- |
-| **0** | a release on a label whose `seed_state` is `enabled`          | **yes** — the label is enabled         |
-| **1** | an artist who appears on such a release                       | (a hop, not a release)                 |
-| **2** | a release that artist **also** appears on                     | **only if its label is `enabled`** too |
-| —     | **STOP.** `maxHop` (default 2, ceiling 3) ends the walk here. |                                        |
+| hop   | what it is                                                    | stored?                               |
+| ----- | ------------------------------------------------------------- | ------------------------------------- |
+| **0** | a release on a label whose `seed_state` is `enabled`          | **yes** — per the three-layer verdict |
+| **1** | an artist who appears on such a release                       | (a hop, not a release)                |
+| **2** | a release that artist **also** appears on                     | **per the three-layer verdict** too   |
+| —     | **STOP.** `maxHop` (default 2, ceiling 3) ends the walk here. |                                       |
 
-Hop distance bounds the **discovery**, never the **storage**. A hop-2 release on an enabled label **is** stored; a hop-0 seed release is stored because its seed label is enabled, not because it sits at hop 0. A hop-2 release on a reggae, jazz, or major label is walked for the labels it reveals and then its tracks are dropped on the floor. A node past the limit is never enqueued, so the walk **terminates by construction** rather than by a watchdog. Set `--max-hop 0` and the crawl never leaves the seed labels' own releases at all.
+Hop distance bounds the **discovery**, never the **storage**. A hop-2 release on an enabled label **is** stored; a hop-0 seed release is stored because its seed label is enabled, not because it sits at hop 0. A hop-2 release on a reggae, jazz, or major label is walked for the labels it reveals and then its tracks are dropped on the floor — unless an allow rule names its first-credited artist, which is exactly what the allow exists for. A node past the limit is never enqueued, so the walk **terminates by construction** rather than by a watchdog. Set `--max-hop 0` and the crawl never leaves the seed labels' own releases at all.
 
 The one hard-coded exclusion is an identity, not a judgement: MusicBrainz's **"Various Artists"** placeholder is credited on every compilation ever pressed, so following it as a hop-1 artist would walk the crawler out of drum & bass and into the whole of recorded music in a single step.
 
@@ -109,9 +115,14 @@ The whole thing is the agent-tier `backfill_recording_mbids` op (CLI `fluncle ad
 
 A catalogue track's `track_id` is `mb_<musicbrainz-recording-id>` — deterministic, so re-crawling the same recording collides on the PK and writes nothing. **A re-crawl of the same graph writes zero new rows.**
 
-## The seed re-arm (release freshness)
+## The re-arms (release freshness + scope changes)
 
 Enabled seed labels are recurring subscriptions. Each pass re-arms eligible MusicBrainz label nodes older than `REARM_AFTER_DAYS`, probes the tail, pages backward, and stops when a page adds no release nodes. `REARM_BATCH` bounds each pass.
+
+Scope changes get their own re-arm legs, because a `done` frontier node never revives on its own and a widened scope would otherwise silently strand the back catalogue that was walked-and-refused under the old rules:
+
+- **The scoped label re-arm.** Enabling a label — or changing its artist rules, or an explicit `fluncle admin labels update <slug> --rewalk` — stamps `labels.scope_changed_at`. The tick replays that label's walk forward: done release nodes whose `done_at` predates the watermark revive (`pending`, cursor 0, hop 0, the label's own provenance), so previously refused releases get re-judged under the new scope. Terminal completion stamps a fresh `done_at`, so the replay terminates by construction — a second pass over an unchanged scope is a no-op.
+- **The allowed-artist re-arm.** A new allow rule owes the crawl that artist's back catalogue, which may sit on labels the crawler never seeds from. The tick mints (or revives) the artist's own MB browse node at hop 0, keyed on the rule's `rearmed_at` watermark, and the daily tail freshness covers allowed artists thereafter. Failed nodes keep their backoff; only their walk state resets.
 
 ## The freshness tap (day-one releases)
 
@@ -119,6 +130,7 @@ The seed re-arm closes the freshness gap **within MusicBrainz** — but MusicBra
 
 MusicBrainz carries the complete graph; Spotify provides the bounded day-one freshness tap. Probe only enabled seed labels. Mint an album only when a known Spotify artist grounds it and the normalized copyright label exactly matches the seed. Fetch album and track records individually because batch endpoints are unavailable at the configured API tier.
 
+- **Scope-aware, write-leg only.** The tap keeps probing every enabled label — no worklist exclusion. Its write leg drops a track whose FIRST Spotify artist id matches a block rule's resolved Spotify bridge (per-label for the probed label, else global), counted as `tracksSkippedArtistRule`. Everything fails open — a track with no ids, a rule with no resolved bridge (tap-blind), or the advisory read erroring all keep the track; the crawler remains the exact enforcer. Allows never apply here: the tap only probes enabled labels, and allowed artists on disabled labels ride the allowed-artist re-arm instead.
 - **No date, no mint.** An album carrying no `release_date` is dropped before either signal is weighed. `/fresh` selects on `release_date`, so a null-dated row is **invisible** there — it would pollute `tracks` with a permanently unreachable row while delivering exactly none of the day-one freshness the tap exists for. Minting it is a silent no-op, so it is never minted (`skippedUndated` is the tripwire if a vendor ever starts returning them).
 - Route every tap call through the shared Spotify call meter and Retry-After handling. The tap uses only budget below its own ceiling, pauses cleanly on the ceiling or a 429, and resumes from its persisted reliability state.
 

@@ -102,6 +102,8 @@ The findings board exposes an automated-socials aggregate whose hover card inclu
 
 All are enforced by the build-fail coverage tests (`orpc-admin-coverage` / `orpc-auth-coverage`) and the `orpc-naming` verb set. The server layer lives in `apps/web/src/lib/server/artists.ts` (queue + CRUD + review); resolution in `artist-resolution.ts`.
 
+**Global acquisition rules live on the artist entity's surface.** `list_artist_rules` (admin) and `add_artist_rule` / `remove_artist_rule` (operator) on `/admin/artist-rules` (`admin-artist-rules.ts`; server layer `artist-rules.ts`) rule an artist across every label: a global block ("never take their records") refuses the act's own records everywhere; a global allow ("always take their records") admits them from any label the crawler walks. Keyed on the artist's MB MBID — deliberately not on `artists.id`, which conflated or duplicate rows would poison — with a per-label override layer owned by the label entity ([label-entity.md](./label-entity.md)). The scope axis is the crawler's: acquisition only, never what is already stored.
+
 ## Follow scope
 
 Artist relationships are identity-only and expose no follow operations or state. Add following only if the target platform supports it under Fluncle's available API tier and the operation has a durable quota budget.

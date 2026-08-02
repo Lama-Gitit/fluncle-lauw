@@ -93,6 +93,8 @@ The two lenses are **disjoint by construction**: scoring a track clears its `cap
 
 `capture_priority` is what the **work queues** ([docs/gpu-batch-embed.md](./gpu-batch-embed.md)) actually drain on: `list_track_work` serves capture, analysis, and embedding off `tracks`, ordered certified-first and then by this ladder. The veto is scoped to **capture** alone — a ruling governs what Fluncle _acquires_, not what he may _measure_, so a vetoed track whose bytes are already on file is still analysed and embedded (and its vector is how The Ear gets to disagree with the ladder).
 
+**Artist rules do not touch this ladder.** The crawler's per-artist allow/block exceptions ([catalogue-crawler.md](./catalogue-crawler.md#the-boundary-gate-enabled-label-storage--graph-distance-discovery)) are storage-scope only: a blocked artist's already-stored rows keep their tier, and an allowed artist's newly stored rows enter the ladder like any other catalogue row. Folding scope into the spend ladder is deliberately deferred until credit MBIDs are persisted per track — until then the ladder cannot see who a row's first credit is, and a half-blind veto would misfire.
+
 This repo does **not** build the capture itself — the acquisition layer lives in the private companion repo (the-archive RFC, D6). The Ear ships the queue and the priority signal; the layer that acts on them reads `capture_priority` and works down.
 
 ## The long-form veto — a mix is not a track

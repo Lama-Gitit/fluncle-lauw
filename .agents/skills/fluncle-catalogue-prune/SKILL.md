@@ -18,6 +18,8 @@ description: >-
 
 Fluncle is a **drum & bass** archive. The crawler’s write gate prevents off-boundary catalogue entry. This procedure removes off-genre entities already present in the catalogue.
 
+It is also the **retroactive remedy for scope changes**: seed rulings and artist rules (docs/label-entity.md, docs/catalogue-crawler.md) govern acquisition only and never touch stored rows, so when a label is disabled or an artist is blocked AFTER their catalogue landed, this pass — not the rule — is what removes the rows already there. A label removed outright takes its `artist_rules` scope with it (the per-label rules are meaningless without the row).
+
 It is destructive on production. Genre rulings require human review: scripts surface candidates and perform confirmed mechanical changes; the operator makes each genre call. Read `references/traps.md` before your first run — it is the list of specific false-positives (DJ Marky, S.P.Y, a DJ Marky classic) that a naive rule would have deleted.
 
 ## Ground rules (non-negotiable)
