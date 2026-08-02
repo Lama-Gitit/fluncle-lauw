@@ -39,7 +39,7 @@ Triage keeps stranding mixed-genre labels in `unclear`, and the label-level gate
 Calibration:
 
 - **In reach:** exact FIRST-credit exception storage both directions; triage proposing per-label rules with evidence; admin + CLI surfaces; the pilot; the enabled-label backfill.
-- **In reach with stated limits:** back-catalogue arrival after a rule/enable. The constraint is the crawl tick's release half-batch × cadence (deployed `FLUNCLE_CRAWL_NODES=30`, 15 release slots/tick, ~5.6 ticks/h → ≈84 release expansions/h ceiling), not the MB request rate. Hospital-scale ≥12 h; stated on the board.
+- **In reach with stated limits:** back-catalogue arrival after a rule/enable. The constraint is the crawl tick's release half-batch × cadence (deployed `FLUNCLE_CRAWL_NODES=30`, 15 release slots/tick, ~5.6 ticks/h → ≈84 release expansions/h ceiling), not the MB request rate. Hospital-scale ≥12 h; stated on the board. Re-armed nodes enter at **hop 0**, so they jump ahead of the deep-walk backlog (157,966 pending frontier nodes as of 2026-08-02) — the re-walk timing holds even with a loaded frontier, but PR 0's storable-mix fix must land first or the _organic_ drain keeps spending ~26 % of the budget on guaranteed-unstorable fetches (the operator's 2026-08-02 diagnosis brief, folded in below).
 - **Sparse upstream, not absent:** MB remixer relations exist in the crawler's request for +2.8 % payload but cover ~4.5 % of pilot rows; v1 does not scope on remixers (§9.3).
 
 ## 2. Data model
@@ -177,6 +177,8 @@ Ratified vocabulary: **take** is the acquisition verb. Label row `⋮`: "Block a
 
 ## 10. Sequencing
 
+0. **PR 0 — the storable-mix pick (from the operator's 2026-08-02 growth diagnosis):** sort the release half of `pickNodes` (crawl.ts:400, query at :421–:425) so storable-class provenance drains first — enabled-provenance releases and **allow-artist subtrees** ahead, disabled-provenance only when those are empty. Deprioritize, never prune: `label_slug` is inherited provenance, not the pressing label, so a disabled-provenance release can still store (and under this RFC, a global allow can store from _any_ provenance) — deletion is the wrong-disable failure mode. One query change (join `labels` on `label_slug` for `seed_state`), validated against **hosted** Turso per docs/local-database.md ("Local is not production"). Payoff measured in the brief: ~40k pending disabled-provenance releases ≈ two weeks of budget currently earmarked for zero-yield fetches; the fix also throttles the triage-noise minting (round 1 ran 87 % not_dnb because disabled neighbourhoods manufacture their own undecided labels).
+
 1. **PR 1 — the re-arm unit:** `scope_changed_at` + `rearmed_at` columns, enable-path stamp, `rearmScopedLabelReleases` + `rearmAllowedArtists` in the tick, enqueue re-arm mode, `--rewalk`, and the enable-after-walk test that does not exist today.
 2. **PR 2 — schema + gate:** `artist_rules`, the memo, the verdict filter (inert until rules exist; tests seed by direct insert), counters, pass note.
 3. **PR 3 — contracts + CLI** (all ops above, merge behaviour, bridge resolution at write).
@@ -184,7 +186,7 @@ Ratified vocabulary: **take** is the acquisition verb. Label row `⋮`: "Block a
 5. **PR 5 — admin surfaces** (labels dialog + chips + queued count; artists global actions; smokes).
 6. **PR 6 — triage skill** (repo-only; `skills:install`).
 7. **PR 7 — the pilot (operator-gated production act):** global-block **Jus Now** (`3ae210f7…`, bridge id `0iT2o4MNsBKSLy7bllgdo0`) + plain-enable **Gutterfunk**. Prod verified: the label row exists (undecided, correct MBID) with **zero stored tracks** — clean slate, empty prune leg, no capture exposure. Acceptance: back catalogue arrives via the re-walk; Jus Now first-credit records refused (`tracksSkippedArtistRule` visible); 124/130 recordings stored incl. both Gypsy Woman mixes.
-8. **PR 8 — the backfill (operator-gated):** stamp `scope_changed_at` on all enabled labels; monitor the drain in the ledger.
+8. **PR 8 — the backfill (operator-gated, after PR 0):** stamp `scope_changed_at` on all enabled labels; the re-armed hop-0 volume then competes only with itself and the (post-PR 0) storable drain, not with dead disabled-provenance fetches. Monitor in the ledger.
 
 ## 11. Doc/canon fan-out
 
@@ -210,6 +212,7 @@ The acquisition-axis restatement (everywhere): _A ruling and its artist rules go
 8. Agents propose per-label rules (both verdicts) with evidence; operator ratifies; globals operator-authored (prose suggestions only) — **ratified**.
 9. Vocabulary: take/Except/Only/Never/Always set — **ratified**.
 10. Build starts on operator trigger — **not before**.
+11. The 2026-08-02 growth-diagnosis fix (storable-mix pick ordering) is folded in as PR 0 — deprioritize disabled-provenance, never prune; allow-artist subtrees count as storable-class — **ratified by inclusion**.
 
 ## Risks & open questions
 
@@ -220,6 +223,7 @@ The acquisition-axis restatement (everywhere): _A ruling and its artist rules go
 
 ## Appendix — verifications & sources
 
+**Growth diagnosis (operator-supplied, 2026-08-02, folded in):** all-time crawled rows 27.5k → 72k since Jul 18, flattening; throughput flat ~2,800–3,150 nodes/day (MB budget-pinned) while the storable fraction of hop-2 declined. Frontier: 157,966 pending / 37,208 done; pending releases = 112,805 enabled-provenance + 40,173 disabled-provenance + 750 hop-0; 4,987 hop-1 artists. Enabled backlog ≈ 5 weeks at current pace; the 08-01 enables should re-steepen the curve. Saturation tripwire (not currently met on any signal): pending → 0 while mint rate < done rate and no undecided labels left.
 **Interview round (2026-08-01→02):** prod Gutterfunk row `lbl_16f6f120…` undecided, mb `c7a4f6d6…`, 0 stored tracks, 0 raw-string matches; Jus Now MB artist `3ae210f7…` carries Spotify url-rel `0iT2o4MNsBKSLy7bllgdo0` (the bridge proof); tap album parse keeps Spotify artist ids (label-releases.ts:312) while `parseProbeTrack` discards per-track ids it receives (:334); artist-hop discovery leg runs regardless of storage (crawl.ts:1365); `record_demand` re-orders, never stores (demand.ts); qualified-artists SQL authorizes capture only (catalogue.ts:815–880); non-test `tracks` writers = crawl.ts, label-releases.ts, publish.ts.
 **Panel round (2026-07-31):** census 37/133/130/50 with corrected quantifier tables; Maddslinky first-credit = 0; Gypsy Woman = DieMantle remix credited solely to Crystal Waters (remixer rel verified; +2.8 % inc cost); browse status behaviour; Med School Imprint + `label ownership` edge; Hospital = 1,019 releases; deployed crawl budget 30 / release half-batch 15 / cadence ~10.75 min; 70-MBID drift probe (0 merges); mergeLabel's 8-statement batch; per-isolate MB rate gate + 2026-07-19 incident; `settle`'s unconditional `done_at`; the one partial `'enabled'` index; migration shape precedents; `/admin/labels` absent from touch-smoke.
 **Overturned in v1→v2:** label modes (superseded); tap exclusion (superseded by the bridge); "remixer data doesn't exist" (sparse, not absent); the browse-in-the-write re-arm; fold-keyed memo; the DB-side dialog count; the write-ordering ritual; the ~8-artist cap (share test); the doctrine axis (writes → acquisition).
