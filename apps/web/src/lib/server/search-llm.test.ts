@@ -115,7 +115,7 @@ describe("translateQuery — and every way it is allowed to fail", () => {
     return JSON.parse(init.body) as Record<string, unknown>;
   }
 
-  it("sends no reasoning field when OPENROUTER_REASONING_EFFORT is unset — yesterday's exact request shape", async () => {
+  it("sends no reasoning field when OPENROUTER_REASONING_EFFORT is unset", async () => {
     fetchMock.mockResolvedValue(reply('{"artist":"Netsky"}'));
 
     await translateQuery("Netsky tracks");
@@ -123,8 +123,6 @@ describe("translateQuery — and every way it is allowed to fail", () => {
     expect(sentBody().reasoning).toBeUndefined();
   });
 
-  // The effort pin is load-bearing for a reasoning model: the 2026-08-02 bench measured every
-  // level above `low` scoring WORSE on this parse, so the env var must actually reach the wire.
   it("pins the reasoning effort on the request when the env names one", async () => {
     readOptionalEnv.mockImplementation(async (name) => {
       if (name === "OPENROUTER_API_KEY") {

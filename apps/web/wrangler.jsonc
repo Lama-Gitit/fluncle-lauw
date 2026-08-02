@@ -46,12 +46,10 @@
     // switch remains.)
     "CARTESIA_VOICE_ID": "ca8c023f-1901-40f7-be8c-faafd7a58139",
     // The search-filter model (tier 4, lib/server/search-llm.ts), non-secret config.
-    // Flipped Haiku → Luna on the 2026-08-02 bench (bench-search-filter.ts): Luna at
-    // effort `low` tied Haiku on every rail (100% parse, 85% golden-exact, zero
-    // deadline misses) at ~5× cheaper. The effort pin is LOAD-BEARING for any
-    // reasoning model here — every level above `low` measured WORSE on this parse —
-    // and the pair travels together: rollback is deleting BOTH lines (the code
-    // default is the proven Haiku, sending no reasoning field).
+    // The effort pin is LOAD-BEARING for a reasoning model — higher efforts parse
+    // this task worse (scripts/bench-search-filter.ts grades any model × effort) —
+    // so the pair travels together: set both or delete both. Deleting both falls
+    // back to the code default, a non-reasoning model with no reasoning field.
     "OPENROUTER_SEARCH_MODEL": "openai/gpt-5.6-luna",
     "OPENROUTER_REASONING_EFFORT": "low",
   },

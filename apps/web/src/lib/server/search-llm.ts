@@ -117,12 +117,11 @@ export async function translateQuery(query: string): Promise<SearchFilters | nul
 
   const model = (await readOptionalEnv("OPENROUTER_SEARCH_MODEL")) ?? DEFAULT_SEARCH_MODEL;
 
-  // Reasoning effort, env-gated: absent means NO `reasoning` field at all — the non-reasoning
-  // steady state, and exactly yesterday's request shape. When the model var names a reasoning
-  // model, this MUST be pinned (prod pins `low`): the 2026-08-02 bench measured the effort
-  // ladder INVERTING on this task — every level above `low` blew the deadline more and scored
-  // worse even without one, because deliberation "corrects" what the rails say to copy
-  // verbatim. A parse has no judgment content to spend effort on.
+  // Reasoning effort, env-gated: absent sends no `reasoning` field. A reasoning model here
+  // must be pinned LOW — higher efforts blow the deadline AND parse worse, because
+  // deliberation "corrects" what the rails say to copy verbatim, and a parse has no judgment
+  // content to spend effort on. Measured, and re-measurable for any model × effort, by
+  // scripts/bench-search-filter.ts.
   const reasoningEffort = await readOptionalEnv("OPENROUTER_REASONING_EFFORT");
 
   // The system prompt, resolved from the registry: the operator's override if one is on

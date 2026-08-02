@@ -1,15 +1,13 @@
 name: Dependency Audit
 
 # Dependabot does not parse bun.lock, so its clean alert queue misses advisories
-# that Bun can see. This workflow closes that blind spot; at introduction the
-# lockfile has 15 known high-severity advisories, mostly in transitive dev/build
-# tooling.
+# that Bun can see. This workflow closes that blind spot.
 #
-# This is deliberately REPORT-ONLY. Advisory drift can otherwise turn main red
-# without a code change, the 15 existing highs need a triage pass before the check
-# can block, and several affected dependency trees sit behind deliberate Renovate
-# holds. To make this blocking: triage accepted findings into an `--ignore` CVE
-# allowlist with a justification for every entry, then remove continue-on-error.
+# This is deliberately REPORT-ONLY: advisory drift can turn main red without a
+# code change, and known findings tend to sit in transitive dev/build tooling,
+# some behind deliberate Renovate holds. To make this blocking: triage the open
+# findings into an `--ignore` CVE allowlist with a justification for every
+# entry, then remove continue-on-error.
 #
 # `bun audit` reads bun.lock directly, so this job does not need an install step.
 # The registry request is reported separately from findings so an npm availability

@@ -231,11 +231,10 @@ const envKeys = [
   // parser. Unprovisioned, search degrades to full text and keeps working.
   "OPENROUTER_SEARCH_MODEL",
   // OPTIONAL reasoning-effort pin for that same search model, sent as OpenRouter's
-  // `reasoning: { effort }` only when set. LOAD-BEARING whenever OPENROUTER_SEARCH_MODEL
-  // names a reasoning model: the 2026-08-02 bench measured every effort above `low`
-  // scoring worse on this parse (deliberation "corrects" what the rails say to copy
-  // verbatim), so prod pins `low` in wrangler.jsonc and the two vars travel together.
-  // Absent, no reasoning field is sent — the non-reasoning steady state.
+  // `reasoning: { effort }` only when set; absent, no reasoning field is sent.
+  // LOAD-BEARING whenever OPENROUTER_SEARCH_MODEL names a reasoning model — higher
+  // efforts parse this task worse (scripts/bench-search-filter.ts) — so the two vars
+  // travel together in wrangler.jsonc: set both or delete both.
   "OPENROUTER_REASONING_EFFORT",
   // Simple Analytics read API — the demand signal (docs/catalogue-crawler.md § Demand). The
   // Worker fetches the pageview stats itself (`GET simpleanalytics.com/fluncle.com.json`, the
