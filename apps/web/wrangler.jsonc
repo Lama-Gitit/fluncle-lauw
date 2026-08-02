@@ -45,6 +45,15 @@
     // was fully decommissioned after the migration — no key, voice id, or provider
     // switch remains.)
     "CARTESIA_VOICE_ID": "ca8c023f-1901-40f7-be8c-faafd7a58139",
+    // The search-filter model (tier 4, lib/server/search-llm.ts), non-secret config.
+    // Flipped Haiku → Luna on the 2026-08-02 bench (bench-search-filter.ts): Luna at
+    // effort `low` tied Haiku on every rail (100% parse, 85% golden-exact, zero
+    // deadline misses) at ~5× cheaper. The effort pin is LOAD-BEARING for any
+    // reasoning model here — every level above `low` measured WORSE on this parse —
+    // and the pair travels together: rollback is deleting BOTH lines (the code
+    // default is the proven Haiku, sending no reasoning field).
+    "OPENROUTER_SEARCH_MODEL": "openai/gpt-5.6-luna",
+    "OPENROUTER_REASONING_EFFORT": "low",
   },
   // Media Transformations (playback renditions): the web playback surfaces request
   // same-zone /cdn-cgi/media renditions of each master (lib/media.ts). These require

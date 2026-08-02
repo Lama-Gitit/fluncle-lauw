@@ -117,6 +117,14 @@ export async function translateQuery(query: string): Promise<SearchFilters | nul
 
   const model = (await readOptionalEnv("OPENROUTER_SEARCH_MODEL")) ?? DEFAULT_SEARCH_MODEL;
 
+  // Reasoning effort, env-gated: absent means NO `reasoning` field at all — the non-reasoning
+  // steady state, and exactly yesterday's request shape. When the model var names a reasoning
+  // model, this MUST be pinned (prod pins `low`): the 2026-08-02 bench measured the effort
+  // ladder INVERTING on this task — every level above `low` blew the deadline more and scored
+  // worse even without one, because deliberation "corrects" what the rails say to copy
+  // verbatim. A parse has no judgment content to spend effort on.
+  const reasoningEffort = await readOptionalEnv("OPENROUTER_REASONING_EFFORT");
+
   // The system prompt, resolved from the registry: the operator's override if one is on
   // file, else the baked default above. `resolvePrompt` cannot throw and falls back to
   // that default, so the degradation contract below is untouched — search still answers
@@ -131,6 +139,7 @@ export async function translateQuery(query: string): Promise<SearchFilters | nul
           { content: query, role: "user" },
         ],
         model,
+        ...(reasoningEffort ? { reasoning: { effort: reasoningEffort } } : {}),
         // Structure, not creativity: the same sentence must parse to the same filters.
         response_format: { type: "json_object" },
         temperature: 0,

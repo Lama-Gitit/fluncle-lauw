@@ -104,6 +104,44 @@ describe("translateQuery — and every way it is allowed to fail", () => {
     expect(await translateQuery("anything")).toBeNull();
   });
 
+  /** The JSON body of the first captured fetch, or a loud throw when none was sent. */
+  function sentBody(): Record<string, unknown> {
+    const init = fetchMock.mock.calls[0]?.[1] as RequestInit | undefined;
+
+    if (typeof init?.body !== "string") {
+      throw new Error("no request body was captured");
+    }
+
+    return JSON.parse(init.body) as Record<string, unknown>;
+  }
+
+  it("sends no reasoning field when OPENROUTER_REASONING_EFFORT is unset — yesterday's exact request shape", async () => {
+    fetchMock.mockResolvedValue(reply('{"artist":"Netsky"}'));
+
+    await translateQuery("Netsky tracks");
+
+    expect(sentBody().reasoning).toBeUndefined();
+  });
+
+  // The effort pin is load-bearing for a reasoning model: the 2026-08-02 bench measured every
+  // level above `low` scoring WORSE on this parse, so the env var must actually reach the wire.
+  it("pins the reasoning effort on the request when the env names one", async () => {
+    readOptionalEnv.mockImplementation(async (name) => {
+      if (name === "OPENROUTER_API_KEY") {
+        return "test-key";
+      }
+      if (name === "OPENROUTER_REASONING_EFFORT") {
+        return "low";
+      }
+      return undefined;
+    });
+    fetchMock.mockResolvedValue(reply('{"artist":"Netsky"}'));
+
+    await translateQuery("Netsky tracks");
+
+    expect(sentBody().reasoning).toEqual({ effort: "low" });
+  });
+
   it("puts the call on a deadline — a slow model must not become a slow search", async () => {
     fetchMock.mockResolvedValue(reply("{}"));
 
