@@ -123,6 +123,7 @@ _(Price/intelligence are relative 1–10 guides, not measured costs.)_
 ## Docs
 
 - MUST: Keep `AGENTS.md` principle-level. Put repeatable workflows in scripts, high-risk operator flows in runbooks, and task-specific routing in skills.
+- MUST: Comments and test names state standing constraints, never change history — no dates, no before/after, no "flipped/was/measured on/shipped/verified live". History lives in commit messages; dated entries belong only in the ledgers and `docs/planning/`. Cite re-runnable evidence (a script, a doc) instead of a dated event. A date that IS domain semantics (an epoch constant, a schedule example, fixture data) is data, not history, and stays.
 - MUST: Keep Markdown prose paragraphs on single logical lines; do not add hard line breaks mid-sentence or reflow text just to wrap at a fixed column.
 - SHOULD: Prefer deleting, merging, or linking stale docs over adding another parallel explanation.
 - MUST: Treat everything under `docs/planning/` (roadmaps, e.g. `docs/planning/ROADMAP.md`) and `docs/rfcs/`, plus any `docs/*-brief.md`, as non-canonical brainstorms and planning, never specification — these are never listed in the canon list below. Where such a doc deviates from the codebase or from canon (`LORE.md`, `DESIGN.md`, `PRODUCT.md`, `VOICE.md`), the codebase and canon win; translate the idea into Fluncle's terms when picking it up.
