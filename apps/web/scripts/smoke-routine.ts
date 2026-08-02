@@ -323,7 +323,7 @@ async function main(): Promise<void> {
       String(HTTP_PORT),
     ]);
     children.push(vite);
-    await waitForHttp(`${BASE_URL}/api/health`, [turso, vite]);
+    await waitForHttp(`${BASE_URL}/api/v1/health`, [turso, vite]);
     console.log(`smoke:routine — stack ready at ${BASE_URL}`);
 
     // ── Run the three smokes; continue past a failure so all three report ──────
