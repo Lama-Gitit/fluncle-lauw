@@ -619,6 +619,10 @@ function configuredProviders(): { providers: Provider[]; skipped: string[] } {
     skipped.push("OpenRouter — missing OPENROUTER_API_KEY");
   } else {
     const model = process.env.OPENROUTER_SEARCH_MODEL ?? DEFAULT_OPENROUTER_MODEL;
+    // OPENROUTER_REASONING_EFFORT is passed through verbatim (e.g. low/medium/high/xhigh/max) so a
+    // reasoning model can be benched at each of its effort levels; the API rejects what it doesn't
+    // support, and that rejection surfaces per-case as an error row rather than aborting the run.
+    const reasoningEffort = process.env.OPENROUTER_REASONING_EFFORT;
 
     providers.push({
       invoke: async (query, prompt, timeoutMs) => {
@@ -629,6 +633,7 @@ function configuredProviders(): { providers: Provider[]; skipped: string[] } {
               { content: query, role: "user" },
             ],
             model,
+            ...(reasoningEffort ? { reasoning: { effort: reasoningEffort } } : {}),
             response_format: { type: "json_object" },
             temperature: 0,
             usage: { include: true },
@@ -643,7 +648,7 @@ function configuredProviders(): { providers: Provider[]; skipped: string[] } {
 
         return openRouterContent(await responseJson(response, "OpenRouter"));
       },
-      model,
+      model: reasoningEffort ? `${model} (effort=${reasoningEffort})` : model,
       name: "openrouter",
     });
   }
