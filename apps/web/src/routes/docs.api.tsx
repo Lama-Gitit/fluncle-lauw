@@ -98,6 +98,14 @@ function ApiReference() {
         hideDarkModeToggle: true,
         theme: "none",
         url: "/api/v1/openapi.json",
+        // Scalar defaults this to true and then fetches its own faces from
+        // fonts.scalar.com — 14 files, none of them ever used, because `customCss`
+        // above already re-points `--scalar-font` and `--scalar-font-code` at our own
+        // stack. Turning it off removes 14 wasted requests from this page AND keeps
+        // `font-src 'self'` strict: a real-browser sweep on 2026-08-02 caught those
+        // fonts as the only third-party font this site requests, and the honest fix was
+        // to stop asking for them rather than widen the policy to a new origin.
+        withDefaultFonts: false,
       }}
     />
   );

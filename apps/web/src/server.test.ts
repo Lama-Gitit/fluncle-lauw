@@ -1,8 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
-  ENFORCED_CSP,
-  REPORT_ONLY_CSP,
-  REPORT_ONLY_CSP_WITH_REPORTING,
+  CONTENT_POLICY,
+  CONTENT_POLICY_WITH_REPORTING,
   REPORTING_ENDPOINTS_VALUE,
 } from "./lib/server/security-headers";
 
@@ -321,10 +320,8 @@ describe("server.ts shared-cache isolation", () => {
     expect(hit.headers.get("x-content-type-options")).toBe("nosniff");
     expect(hit.headers.get("strict-transport-security")).toBe("max-age=31536000");
     expect(hit.headers.get("referrer-policy")).toBe("strict-origin-when-cross-origin");
-    expect(hit.headers.get("content-security-policy")).toBe(ENFORCED_CSP);
-    expect(hit.headers.get("content-security-policy-report-only")).toBe(
-      REPORT_ONLY_CSP_WITH_REPORTING,
-    );
+    expect(hit.headers.get("content-security-policy")).toBe(CONTENT_POLICY_WITH_REPORTING);
+    expect(hit.headers.get("content-security-policy-report-only")).toBeNull();
     expect(hit.headers.get("reporting-endpoints")).toBe(REPORTING_ENDPOINTS_VALUE);
     // The stored body itself is unstamped — the policy is applied per response, so it is
     // never frozen at the age of the cached document.
@@ -363,12 +360,11 @@ describe("server.ts security headers", () => {
     expect(response.headers.get("x-content-type-options")).toBe("nosniff");
     expect(response.headers.get("referrer-policy")).toBe("strict-origin-when-cross-origin");
     expect(response.headers.get("strict-transport-security")).toBe("max-age=31536000");
-    expect(response.headers.get("content-security-policy")).toBe(ENFORCED_CSP);
-    expect(response.headers.get("content-security-policy-report-only")).toBe(
-      REPORT_ONLY_CSP_WITH_REPORTING,
-    );
+    expect(response.headers.get("content-security-policy")).toBe(CONTENT_POLICY_WITH_REPORTING);
+    expect(response.headers.get("content-security-policy-report-only")).toBeNull();
     // The CSP report sink, wired end to end: an SSR document tells the browser where to
-    // POST a violation, so the report-only policy actually produces evidence.
+    // POST a violation. Now that the policy ENFORCES, that is the only way a block
+    // reaching a real visitor is ever noticed — there is no runtime kill switch.
     expect(response.headers.get("reporting-endpoints")).toBe(REPORTING_ENDPOINTS_VALUE);
     expect(await response.text()).toBe("router-sentinel");
   });
@@ -440,11 +436,12 @@ describe("server.ts security headers", () => {
     const response = await dispatch("http://localhost:3000/about", { accept: "text/html" });
 
     expect(response.headers.get("strict-transport-security")).toBeNull();
-    // Everything else still matches prod, so dev exercises the same policy — minus the
-    // report sink, which is withheld off a public https origin so a dev session never
-    // writes into the production Security feed.
-    expect(response.headers.get("content-security-policy")).toBe(ENFORCED_CSP);
-    expect(response.headers.get("content-security-policy-report-only")).toBe(REPORT_ONLY_CSP);
+    // Dev gets the identical DIRECTIVES but stays advisory: vite binds 127.0.0.1 while
+    // most people browse localhost, and CSP treats those as different origins, so
+    // enforcing connect-src 'self' would refuse the HMR websocket. The sink is withheld
+    // too, so a dev session never writes into the production Security feed.
+    expect(response.headers.get("content-security-policy")).toBeNull();
+    expect(response.headers.get("content-security-policy-report-only")).toBe(CONTENT_POLICY);
     expect(response.headers.get("reporting-endpoints")).toBeNull();
     expect(response.headers.get("x-content-type-options")).toBe("nosniff");
   });

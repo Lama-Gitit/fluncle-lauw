@@ -18,8 +18,8 @@
 //     declared type. (Static assets — /assets, /fonts, the icons — are served by
 //     Cloudflare's asset server and never reach this Worker, so public/_headers
 //     carries the same nosniff for them.)
-//   - `Referrer-Policy` + `Strict-Transport-Security` + the framing CSP + the report-only
-//     policy and its `Reporting-Endpoints` sink on HTML DOCUMENTS only. These are
+//   - `Referrer-Policy` + `Strict-Transport-Security` + the content policy and its
+//     `Reporting-Endpoints` sink on HTML DOCUMENTS only. These are
 //     document-scoped concerns; a JSON API reply, a feed, an OG image, or a media proxy
 //     has no referrer to leak, no frame to protect, and no subresources to police.
 //
@@ -60,20 +60,39 @@ const REFERRER_POLICY_VALUE = "strict-origin-when-cross-origin";
 const HSTS_VALUE = "max-age=31536000";
 
 /**
- * The ENFORCING policy — one directive, and only the one that has to be enforced to do
- * its job. `frame-ancestors` is the modern, iframe-scoped successor to
- * X-Frame-Options; it is inert in a report-only header (report-only never blocks), so
- * clickjacking protection cannot ride the report-only rollout below. Nothing on this
- * site frames itself cross-origin (the oEmbed card is the one framed surface, and it
- * declares its own `frame-ancestors *` — see the structural exemption above), so
- * enforcing `'self'` breaks no legitimate flow.
+ * The clickjacking directive. `frame-ancestors` is the modern, iframe-scoped successor
+ * to X-Frame-Options, and it is inert in a report-only header (report-only never
+ * blocks) — which is why it was the ONE directive enforced on its own during the
+ * report-only rollout, while everything else was still advisory. It is now folded into
+ * the one enforced policy below and no longer ships as a header of its own.
+ *
+ * Nothing on this site frames itself cross-origin (the oEmbed card is the one framed
+ * surface, and it declares its own `frame-ancestors *` — see the structural exemption
+ * above), so `'self'` breaks no legitimate flow.
  */
-export const ENFORCED_CSP = "frame-ancestors 'self'";
+const FRAME_ANCESTORS = "frame-ancestors 'self'";
 
 /**
- * The full content policy, shipped REPORT-ONLY. Report-only is the deliberate rollout
- * choice: the header is advisory, so a directive that turns out to be too tight
- * degrades to a console warning rather than a broken page.
+ * The full content policy — ENFORCED as of 2026-08-02, after a report-only window that
+ * ran from 2026-07-27 and produced four real findings, each fixed at its source rather
+ * than absorbed as an allowlist entry where that was possible:
+ *
+ *   - Simple Analytics' `<img>` beacon (queue.*) — a genuine first-party host, allowed.
+ *   - Cover Art Archive covers, which 307 → archive.org → a per-node `*.archive.org`.
+ *     CSP re-checks every REDIRECT HOP and reports under the ORIGINAL url, so naming
+ *     only the stub read as "already allowed, still blocked" for 157 events.
+ *   - zod's JIT probe (`try { new Function("") } catch {}`) reported as `blocked-uri:
+ *     eval`. It degrades to the interpreted parser, so it was never a reason for
+ *     `'unsafe-eval'`; `client.tsx` sets `jitless` and the reports stopped dead.
+ *   - Scalar's webfonts on /docs/api, found only by a browser sweep because nothing in
+ *     four days of traffic loaded that page. `customCss` already overrides Scalar's font
+ *     variables, so `withDefaultFonts: false` removed 14 unused downloads instead of
+ *     widening `font-src` to a third-party origin.
+ *
+ * The flip was gated on a real-browser sweep of 23 surfaces (public, plus the signed-in
+ * /admin boards where the CAA covers actually render) collecting `securitypolicyviolation`
+ * — which is what report-only alone could never give, since it only ever observes the
+ * pages visitors happen to open.
  *
  * WHY `script-src` still carries `'unsafe-inline'`. TanStack does support a nonce
  * (`router.options.ssr.nonce`, threaded into both the router-managed script tags and
@@ -113,20 +132,32 @@ export const ENFORCED_CSP = "frame-ancestors 'self'";
  *   - lh3.googleusercontent.com — the portrait Better Auth stores on `user.image` for a
  *     "Continue with Google" account that never uploaded one (public-auth.ts).
  *   - *.ingest.de.sentry.io — the browser SDK's ingest (lib/sentry-config.ts).
+ *   - static.cloudflareinsights.com / cloudflareinsights.com — Cloudflare's RUM beacon.
+ *     NOTHING in this repo ships it: Web Analytics' automatic setup makes Cloudflare
+ *     inject the tag at the edge, so it arrives whether or not the app asks. The script
+ *     host and the host it POSTs to (`/cdn-cgi/rum`, read out of beacon.min.js) are
+ *     different, so both are named. Operator ruling 2026-08-01: keep the data, allow it.
+ *     Injection is rare and inconsistent — 15 reports over four days against a streamed
+ *     SSR response — so treat that dashboard as a biased sample, not as traffic.
  *   - `data:` for the CSS grain tile (styles.css), `blob:` for the local avatar-crop
  *     preview (components/account/settings-door.tsx).
  *   - `'unsafe-inline'` in `style-src` because React `style={{…}}` props are style
  *     ATTRIBUTES, which no nonce covers.
  */
-export const REPORT_ONLY_CSP = [
+export const CONTENT_POLICY = [
   "default-src 'self'",
   "base-uri 'self'",
   "object-src 'none'",
   "form-action 'self'",
   "frame-src 'none'",
-  ENFORCED_CSP,
-  "script-src 'self' 'unsafe-inline' https://scripts.simpleanalyticscdn.com",
+  FRAME_ANCESTORS,
+  "script-src 'self' 'unsafe-inline' https://scripts.simpleanalyticscdn.com https://static.cloudflareinsights.com",
   "style-src 'self' 'unsafe-inline'",
+  // font-src stays 'self' — every face is self-hosted (Oxanium, Space Grotesk,
+  // Monaspace Krypton). The one third-party font this site ever requested was Scalar's
+  // on /docs/api, and that was answered by turning Scalar's fonts OFF rather than by
+  // widening this line: `customCss` already re-points --scalar-font at our own stack,
+  // so those 14 downloads were dead weight (routes/docs.api.tsx, withDefaultFonts).
   "font-src 'self'",
   // img-src: the owned R2 masters + the two raw fallback-cover hosts the DTOs can
   // serve (Spotify's CDN, and Cover Art Archive for crawler-minted albums with no
@@ -153,15 +184,20 @@ export const REPORT_ONLY_CSP = [
     "https://found.fluncle.com",
     "https://scripts.simpleanalyticscdn.com",
     "https://queue.simpleanalyticscdn.com",
+    "https://cloudflareinsights.com",
     "https://*.ingest.de.sentry.io",
   ].join(" "),
 ].join("; ");
 
 // ---------------------------------------------------------------------------
-// THE REPORT SINK. A report-only policy with nowhere to report is a policy that
-// produces no evidence — and no evidence means the flip to enforcing stays a guess
-// forever. Sentry ingests CSP violation reports directly at a per-project "Security
-// Header" endpoint, so the sink needs no route of our own, no storage, and no
+// THE REPORT SINK. During the report-only rollout this was what produced the evidence
+// to flip on. Now that the policy is ENFORCED it does something more important: it is
+// the only way a block that reaches a real visitor is ever noticed. There is no runtime
+// kill switch — `securityHeadersFor` is sync and pure BY DESIGN, because it runs on
+// every response including edge-cache hits, and a settings/env lookup there would put
+// an await on the hot path — so rollback is revert-and-deploy, and these reports are
+// what tells anyone a rollback is needed. Sentry ingests CSP reports at a per-project
+// "Security Header" endpoint, so the sink needs no route of our own, no storage, and no
 // rate-limiting to write: the endpoint is derived from a DSN this repo already commits.
 // ---------------------------------------------------------------------------
 
@@ -224,8 +260,8 @@ export const SENTRY_CSP_REPORT_ENDPOINT = sentryCspReportEndpoint(
 );
 
 /**
- * The report-only policy WITH the sink attached — the variant served on a real public
- * origin (see `isPublicHttpsOrigin`).
+ * The policy WITH the sink attached — the variant served on a real public origin (see
+ * `isPublicHttpsOrigin`).
  *
  * Both reporting directives are sent, exactly as Sentry documents. `report-uri` is
  * deprecated-but-universally-supported and is the compatibility floor: Firefox and Safari
@@ -240,9 +276,9 @@ export const SENTRY_CSP_REPORT_ENDPOINT = sentryCspReportEndpoint(
  * Falls back to the bare policy if the DSN ever fails to parse — the policy itself must
  * never depend on the sink existing.
  */
-export const REPORT_ONLY_CSP_WITH_REPORTING = SENTRY_CSP_REPORT_ENDPOINT
-  ? `${REPORT_ONLY_CSP}; report-uri ${SENTRY_CSP_REPORT_ENDPOINT}; report-to ${CSP_REPORT_GROUP}`
-  : REPORT_ONLY_CSP;
+export const CONTENT_POLICY_WITH_REPORTING = SENTRY_CSP_REPORT_ENDPOINT
+  ? `${CONTENT_POLICY}; report-uri ${SENTRY_CSP_REPORT_ENDPOINT}; report-to ${CSP_REPORT_GROUP}`
+  : CONTENT_POLICY;
 
 /** The `Reporting-Endpoints` header value that gives the policy's `report-to` group a URL. */
 export const REPORTING_ENDPOINTS_VALUE = SENTRY_CSP_REPORT_ENDPOINT
@@ -278,6 +314,30 @@ function isPublicHttpsOrigin(url: URL): boolean {
 }
 
 /**
+ * True for a local development origin — and the ONLY place the policy is still advisory.
+ *
+ * This is deliberately NOT `isPublicHttpsOrigin`, which lumps local dev in with the
+ * .onion mirror. Tor visitors read the same markup as everyone else and get the same
+ * enforcement; withholding it there would serve a weaker posture for byte-identical
+ * pages. Local dev is the one origin where enforcement can only cost and never protect.
+ *
+ * The concrete cost: vite binds `127.0.0.1:3000` (vite.config.ts + the `dev:vite`
+ * script), and CSP treats `localhost` and `127.0.0.1` as DIFFERENT origins. Anyone who
+ * browses `http://localhost:3000` — which is what most people type — would have their
+ * HMR websocket to `ws://127.0.0.1:3000` refused by `connect-src 'self'`, killing hot
+ * reload silently. Report-only still prints the same violation to the dev console, so
+ * the early warning survives; only the breakage is dropped.
+ */
+function isLocalDevOrigin(url: URL): boolean {
+  return (
+    url.hostname === "localhost" ||
+    url.hostname === "127.0.0.1" ||
+    url.hostname === "[::1]" ||
+    url.hostname === "::1"
+  );
+}
+
+/**
  * The security headers this request/response pair should carry, as ordered pairs.
  * Exported so the policy is unit-testable without driving a Response through the whole
  * dispatch spine.
@@ -299,21 +359,22 @@ export function securityHeadersFor(request: Request, response: Response): [strin
   }
 
   // THE STRUCTURAL EXEMPTION: a route that declared its own CSP owns its content
-  // policy, so neither the enforcing framing directive nor the report-only policy is
-  // layered over it. This is what keeps the oEmbed card's `frame-ancestors *` intact
-  // without this module carrying `/embed/` anywhere.
+  // policy, so nothing is layered over it. This is what keeps the oEmbed card's
+  // `frame-ancestors *` intact without this module carrying `/embed/` anywhere.
   if (!response.headers.has("content-security-policy")) {
-    // The ENFORCING header stays reporting-free on purpose. It carries `frame-ancestors`
-    // and nothing else; a framing block is a deliberate, already-understood outcome, and
-    // pointing it at the sink would mix enforced blocks into the feed the report-only
-    // rollout is being read from.
-    headers.push(["Content-Security-Policy", ENFORCED_CSP]);
+    // ONE header now, not two. Graduating the full policy to enforcing subsumes the
+    // framing-only header that used to ship beside it — `frame-ancestors 'self'` is a
+    // directive INSIDE this policy — so the report-only slot simply stops being sent
+    // rather than being duplicated.
+    const policyHeader = isLocalDevOrigin(url)
+      ? "Content-Security-Policy-Report-Only"
+      : "Content-Security-Policy";
 
     if (isPublic && REPORTING_ENDPOINTS_VALUE) {
-      headers.push(["Content-Security-Policy-Report-Only", REPORT_ONLY_CSP_WITH_REPORTING]);
+      headers.push([policyHeader, CONTENT_POLICY_WITH_REPORTING]);
       headers.push(["Reporting-Endpoints", REPORTING_ENDPOINTS_VALUE]);
     } else {
-      headers.push(["Content-Security-Policy-Report-Only", REPORT_ONLY_CSP]);
+      headers.push([policyHeader, CONTENT_POLICY]);
     }
   }
 

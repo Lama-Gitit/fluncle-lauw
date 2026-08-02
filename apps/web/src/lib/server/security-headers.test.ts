@@ -2,9 +2,8 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { BROWSER_SENTRY_DSN, SENTRY_RELEASE } from "../sentry-config";
 import {
-  ENFORCED_CSP,
-  REPORT_ONLY_CSP,
-  REPORT_ONLY_CSP_WITH_REPORTING,
+  CONTENT_POLICY,
+  CONTENT_POLICY_WITH_REPORTING,
   REPORTING_ENDPOINTS_VALUE,
   securityHeadersFor,
   SENTRY_CSP_REPORT_ENDPOINT,
@@ -65,17 +64,20 @@ describe("securityHeadersFor", () => {
     expect(headers["Referrer-Policy"]).toBeUndefined();
   });
 
-  it("gives an HTML document the referrer, HSTS, framing and report-only policies", () => {
+  it("gives an HTML document the referrer, HSTS and the ENFORCED policy — one CSP header", () => {
     const headers = headerMap(httpsGet(), html());
 
+    // Exactly one CSP header. Graduating the full policy subsumed the framing-only
+    // header that used to ship beside it, so a report-only header reappearing here means
+    // the flip regressed.
     expect(headers).toEqual({
-      "Content-Security-Policy": "frame-ancestors 'self'",
-      "Content-Security-Policy-Report-Only": REPORT_ONLY_CSP_WITH_REPORTING,
+      "Content-Security-Policy": CONTENT_POLICY_WITH_REPORTING,
       "Referrer-Policy": "strict-origin-when-cross-origin",
       "Reporting-Endpoints": REPORTING_ENDPOINTS_VALUE,
       "Strict-Transport-Security": "max-age=31536000",
       "X-Content-Type-Options": "nosniff",
     });
+    expect(headers["Content-Security-Policy-Report-Only"]).toBeUndefined();
   });
 
   it("gives a NON-document reply nosniff and nothing else", () => {
@@ -89,28 +91,27 @@ describe("securityHeadersFor", () => {
     expect(headers).toEqual({ "X-Content-Type-Options": "nosniff" });
   });
 
-  it("ships the full content policy REPORT-ONLY — the enforcing header carries framing only", () => {
-    // The deliberate rollout choice: nothing but `frame-ancestors` is enforced, so a
-    // directive that turns out to be too tight cannot break a page.
-    expect(ENFORCED_CSP).toBe("frame-ancestors 'self'");
-    expect(ENFORCED_CSP).not.toContain("script-src");
-    expect(ENFORCED_CSP).not.toContain("default-src");
+  it("carries frame-ancestors INSIDE the one enforced policy", () => {
+    // The framing directive used to ship as its own enforced header while everything
+    // else was advisory. It is now a directive in this policy — pinned because losing it
+    // in the collapse would silently drop clickjacking protection.
+    expect(CONTENT_POLICY).toContain("frame-ancestors 'self'");
 
     // …and the honest policy names the hosts the app actually loads, plus the three
     // directives that harden the page even with inline script allowed.
-    expect(REPORT_ONLY_CSP).toContain("object-src 'none'");
-    expect(REPORT_ONLY_CSP).toContain("base-uri 'self'");
-    expect(REPORT_ONLY_CSP).toContain("form-action 'self'");
-    expect(REPORT_ONLY_CSP).toContain("https://scripts.simpleanalyticscdn.com");
-    expect(REPORT_ONLY_CSP).toContain("https://found.fluncle.com");
-    expect(REPORT_ONLY_CSP).toContain("https://i.scdn.co");
-    expect(REPORT_ONLY_CSP).toContain("https://*.ingest.de.sentry.io");
+    expect(CONTENT_POLICY).toContain("object-src 'none'");
+    expect(CONTENT_POLICY).toContain("base-uri 'self'");
+    expect(CONTENT_POLICY).toContain("form-action 'self'");
+    expect(CONTENT_POLICY).toContain("https://scripts.simpleanalyticscdn.com");
+    expect(CONTENT_POLICY).toContain("https://found.fluncle.com");
+    expect(CONTENT_POLICY).toContain("https://i.scdn.co");
+    expect(CONTENT_POLICY).toContain("https://*.ingest.de.sentry.io");
     // Inline script stays allowed on purpose (the edge cache makes a per-request nonce
     // unworkable — see the module comment). Pinned so removing it is a decision, not a
     // drive-by that blanks the site's hydration.
-    expect(REPORT_ONLY_CSP).toContain("'unsafe-inline'");
+    expect(CONTENT_POLICY).toContain("'unsafe-inline'");
     // Never enforced: the Tor mirror serves this markup over http on a .onion host.
-    expect(REPORT_ONLY_CSP).not.toContain("upgrade-insecure-requests");
+    expect(CONTENT_POLICY).not.toContain("upgrade-insecure-requests");
   });
 
   it("allows the hosts a Cover Art Archive cover REDIRECTS to, not just the stub", () => {
@@ -120,9 +121,9 @@ describe("securityHeadersFor", () => {
     // REPORTING it under the stub's URL. It read as "already allowed, still blocked"
     // for 157 events. Both forms are pinned because a `*.archive.org` wildcard does not
     // match the bare apex the first redirect lands on — dropping either re-breaks it.
-    expect(REPORT_ONLY_CSP).toContain("https://coverartarchive.org");
-    expect(REPORT_ONLY_CSP).toContain("https://archive.org");
-    expect(REPORT_ONLY_CSP).toContain("https://*.archive.org");
+    expect(CONTENT_POLICY).toContain("https://coverartarchive.org");
+    expect(CONTENT_POLICY).toContain("https://archive.org");
+    expect(CONTENT_POLICY).toContain("https://*.archive.org");
   });
 
   it("never grants 'unsafe-eval' — the one eval report is a probe that degrades", () => {
@@ -130,8 +131,32 @@ describe("securityHeadersFor", () => {
     // wraps its `new Function` in a try/catch and falls back to the interpreted parser.
     // Nothing breaks, so the report is NOT a reason to open the policy's biggest hole;
     // it is answered at the source by `configureZod({ jitless: true })` in client.tsx.
-    expect(REPORT_ONLY_CSP).not.toContain("unsafe-eval");
-    expect(ENFORCED_CSP).not.toContain("unsafe-eval");
+    // Confirmed: zero eval reports in the two days after that shipped, against ~50/day
+    // before — which is what made enforcing safe without opening this hole.
+    expect(CONTENT_POLICY).not.toContain("unsafe-eval");
+  });
+
+  it("keeps font-src 'self' — the one third-party font was turned OFF, not allowed in", () => {
+    // A real-browser sweep on 2026-08-02 found /docs/api pulling 14 faces from
+    // fonts.scalar.com — invisible to four days of report-only because nothing loads
+    // that page. `customCss` already re-points Scalar's font variables at our own stack,
+    // so the fix was `withDefaultFonts: false` (routes/docs.api.tsx) rather than a new
+    // origin here. This pins the decision: the moment font-src grows a host, that choice
+    // is being reversed.
+    expect(CONTENT_POLICY).toContain("font-src 'self'");
+    expect(CONTENT_POLICY).not.toContain("fonts.scalar.com");
+
+    const source = readFileSync(new URL("../../routes/docs.api.tsx", import.meta.url), "utf8");
+
+    expect(source).toContain("withDefaultFonts: false");
+  });
+
+  it("allows Cloudflare's edge-injected RUM beacon on BOTH hosts it needs", () => {
+    // Nothing in this repo ships the beacon — Web Analytics' automatic setup injects it
+    // at the edge. The script host and the host it POSTs to (/cdn-cgi/rum) differ, so
+    // allowing only the first would still refuse every report it tries to send.
+    expect(CONTENT_POLICY).toContain("https://static.cloudflareinsights.com");
+    expect(CONTENT_POLICY).toContain("https://cloudflareinsights.com");
   });
 
   // THE STRUCTURAL EXEMPTION. `/embed/<logId>` must stay framable by third parties, and
@@ -234,9 +259,9 @@ describe("securityHeadersFor", () => {
       expect(SENTRY_CSP_REPORT_ENDPOINT).toContain("/security/?sentry_key=");
     });
 
-    it("attaches BOTH reporting directives to the report-only policy", () => {
+    it("attaches BOTH reporting directives to the enforced policy", () => {
       const headers = headerMap(httpsGet(), html());
-      const policy = headers["Content-Security-Policy-Report-Only"];
+      const policy = headers["Content-Security-Policy"];
 
       // `report-uri` is the compatibility floor (Firefox and Safari still have nothing
       // else); `report-to` is the Reporting-API successor a modern engine prefers.
@@ -244,7 +269,7 @@ describe("securityHeadersFor", () => {
       expect(policy).toContain("report-to csp-endpoint");
       // The base policy is carried through unchanged — reporting is appended, never a
       // rewrite of the directives.
-      expect(policy?.startsWith(`${REPORT_ONLY_CSP};`)).toBe(true);
+      expect(policy?.startsWith(`${CONTENT_POLICY};`)).toBe(true);
     });
 
     it("gives the report-to group a URL via Reporting-Endpoints", () => {
@@ -256,38 +281,57 @@ describe("securityHeadersFor", () => {
       expect(headers["Report-To"]).toBeUndefined();
     });
 
-    it("leaves the ENFORCING header reporting-free", () => {
-      // It carries `frame-ancestors` and nothing else. A framing block is a deliberate,
-      // already-understood outcome; routing it to the sink would mix enforced blocks into
-      // the feed the report-only rollout is being read from.
+    it("REPORTS from the enforcing header — there is no kill switch, so reports are the net", () => {
+      // The inverse of the rollout-era rule. While the policy was advisory, reporting was
+      // withheld from the enforced header so deliberate framing blocks could not pollute
+      // the feed being read to decide the flip. Now the full policy is what blocks, and
+      // `securityHeadersFor` is sync and pure by design (it runs on every response,
+      // cache hits included), so there is no runtime flag to flip — rollback is
+      // revert-and-deploy and these reports are the only thing that says one is needed.
       const headers = headerMap(httpsGet(), html());
 
-      expect(headers["Content-Security-Policy"]).toBe(ENFORCED_CSP);
-      expect(headers["Content-Security-Policy"]).not.toContain("report-uri");
-      expect(headers["Content-Security-Policy"]).not.toContain("report-to");
+      expect(headers["Content-Security-Policy"]).toContain("report-uri");
+      expect(headers["Content-Security-Policy"]).toContain("report-to");
     });
 
     it("withholds the sink over http — a dev session must not fire a live side channel", () => {
       // Every violation a local `bun run dev` or a headless browser smoke provoked would
-      // otherwise land in the production Security feed, drowning the real signal in exactly
-      // the window that feed is being watched to decide the flip.
+      // otherwise land in the production Security feed, drowning the real signal.
       const headers = headerMap(new Request("http://localhost:3000/"), html());
 
-      expect(headers["Content-Security-Policy-Report-Only"]).toBe(REPORT_ONLY_CSP);
+      expect(headers["Content-Security-Policy-Report-Only"]).toBe(CONTENT_POLICY);
       expect(headers["Content-Security-Policy-Report-Only"]).not.toContain("report-uri");
       expect(headers["Reporting-Endpoints"]).toBeUndefined();
     });
 
-    it("withholds the sink from the .onion mirror", () => {
-      // A Tor visitor's browser must never be handed an instruction to POST to sentry.io —
-      // the mirror exists so that visitor is not traceable to a third party.
+    it("withholds the sink from the .onion mirror, but still ENFORCES there", () => {
+      // Two separate rules, and the split between them is the point. A Tor visitor's
+      // browser must never be handed an instruction to POST to sentry.io — the mirror
+      // exists so that visitor is not traceable to a third party. But the mirror serves
+      // byte-identical markup, so withholding ENFORCEMENT would hand exactly that visitor
+      // the weaker security posture. Silent protection, which is the correct trade.
       const headers = headerMap(
         new Request("https://p53pc2uzfu2tnih4cd6wd42ok6zup2uttj6xdmjdccy5kqo33fyppkqd.onion/log"),
         html(),
       );
 
-      expect(headers["Content-Security-Policy-Report-Only"]).toBe(REPORT_ONLY_CSP);
+      expect(headers["Content-Security-Policy"]).toBe(CONTENT_POLICY);
+      expect(headers["Content-Security-Policy-Report-Only"]).toBeUndefined();
       expect(headers["Reporting-Endpoints"]).toBeUndefined();
+    });
+
+    it("leaves LOCAL DEV advisory — the one origin where enforcing can only cost", () => {
+      // vite binds 127.0.0.1:3000, and CSP treats `localhost` and `127.0.0.1` as
+      // different origins — so enforcing `connect-src 'self'` would refuse the HMR
+      // websocket for anyone who types `localhost`, silently killing hot reload. Dev
+      // still gets the identical directives and still logs the identical console
+      // warning; only the breakage is dropped. Both spellings are pinned.
+      for (const origin of ["http://localhost:3000/", "http://127.0.0.1:3000/"]) {
+        const headers = headerMap(new Request(origin), html());
+
+        expect(headers["Content-Security-Policy-Report-Only"]).toBe(CONTENT_POLICY);
+        expect(headers["Content-Security-Policy"]).toBeUndefined();
+      }
     });
 
     it("sends no reporting header to a route that owns its own CSP", () => {
@@ -321,11 +365,11 @@ describe("securityHeadersFor", () => {
 
       expect(headers["Strict-Transport-Security"]).toBeUndefined();
       // The rest of the document headers still apply in dev, and the DIRECTIVES are
-      // identical to prod's — only the report sink is withheld, so dev exercises the same
-      // policy without writing to the production Security feed.
+      // identical to prod's — dev is advisory rather than enforcing, and the report sink
+      // is withheld, so a dev session exercises the same policy and logs the same console
+      // warning without breaking HMR or writing to the production Security feed.
       expect(headers["Referrer-Policy"]).toBe("strict-origin-when-cross-origin");
-      expect(headers["Content-Security-Policy"]).toBe(ENFORCED_CSP);
-      expect(headers["Content-Security-Policy-Report-Only"]).toBe(REPORT_ONLY_CSP);
+      expect(headers["Content-Security-Policy-Report-Only"]).toBe(CONTENT_POLICY);
     });
 
     it("is NOT sent to a .onion host — the Tor mirror is http by design", () => {
