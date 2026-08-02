@@ -1,233 +1,226 @@
-# RFC: Label artist scope — per-label artist rules on the catalogue crawler's storage gate
+# RFC: Artist rules — allow/block exceptions to the label gate, global and per-label
 
-**Status:** Final (4 research threads → taste pass → 4-role adversarial panel — staff engineer, data correctness, MusicBrainz domain, product/operator — synthesized 2026-07-31) — completeness standard applied.
+**Status:** Final v2 (4 research threads → taste pass → 4-role adversarial panel → operator interview, 2026-08-02). Every open decision is resolved below; the build is deliberately **not started** — the operator triggers it.
 **For:** a build session (or small team of agents) executing against this repo.
-**Canon/authority:** docs/catalogue-crawler.md, docs/label-entity.md, docs/artist-relationship.md, docs/the-ear.md, docs/admin-shell.md, docs/naming-conventions.md, and the codebase. This document is planning, not spec; where it deviates from canon, canon wins.
+**Canon/authority:** docs/catalogue-crawler.md, docs/label-entity.md, docs/artist-relationship.md, docs/the-ear.md, docs/admin-shell.md, docs/naming-conventions.md, and the codebase. Planning, not spec; canon wins on conflict.
 
-> Process note: every load-bearing claim below was either verified live against MusicBrainz (census payloads preserved; appendix) or read from source by at least two independent reviewers. The panel falsified several claims in the draft; the corrections are baked in, and the appendix lists what was overturned so the reasoning is auditable.
+> v2 note: the operator interview reshaped v1's design. The label `scope_mode` (allowlist/blocklist modes) is **gone**; in its place is a strictly simpler exception model that also dissolves several of the panel's hazards (the mode-switch inversion, the store-nothing window, the 409 machinery). v1's verified research and panel corrections all still hold and are cited throughout; the appendix records both review rounds.
 
 ## The standard (definition of done)
 
-Nothing here is optional. The delivery is: the re-arm unit, the schema + migration, the crawler gate + counters, the contracts + CLI, the admin dialog + board surfacing, the triage-skill upgrade, the doc/canon fan-out (six surfaces, §11), and the tests named in §12 — shipped in the §10 order, each PR complete with its tests and docs, with the Gutterfunk pilot applied end-to-end as the acceptance proof. The staged items in §9 are gated on named dependencies (a customer census, a persisted-credit enabler), not on convenience.
+Nothing here is optional. The delivery: the re-arm unit (labels **and** artists), the schema + migration, the crawler gate + counters, the scope-aware freshness tap, the contracts + CLI, the admin surfaces, the triage-skill upgrade, the doc/canon fan-out (§11), and the tests in §12 — shipped in the §10 order, each PR complete with tests and docs, with the pilot (§10.7) and the enabled-label backfill (§10.8) as acceptance proof. §9's staged items are gated on named dependencies, not convenience.
 
-## 0. Summary / the reframe
+## 0. The model (the reframe)
 
-- **The scope is an in-memory filter on data the crawler already holds and discards.** `expandRelease` builds per-track MB artist MBIDs (`creditMbids`, crawl.ts:1283–1288) from its one existing MusicBrainz request and throws them away after edge-linking. The overlay consumes them at the existing storage gate (crawl.ts:1312). Zero new HTTP, zero hot-path SQL — the rule set rides the same per-tick memo as `enabledLabelFolds`.
-- **v1 ships blocklist mode only.** Measured on the pilot: blocklisting one act keeps 124/130 recordings _including future signings_. Blocklist fails open (an error over-stores; prune fixes it); allowlist fails closed (an error silently loses music — the triage skill's own named worst case) and has **no proven customer yet**: every allowlist argument in the draft derived from the single label that wants blocklist, and the census shows a real allowlist needs collaboration-entity expansion (DJ Die's catalogue is 44/130 alone, 57/130 with DieMantle — the "dominant few artists" are many MBIDs). Allowlist is a staged v2 unit with named gates (§9).
-- **Quantifier, measured:** a blocklist **drops a track iff its FIRST credited MBID is blocked** — zero collateral on guest features (`Nuff Pedals feat. Maddslinky` ×2 kept), zero leak on off-lane records (all `Jus Now` tracks dropped). Block-ANY drops 9 (collateral); block-ALL drops 3 (leaks 4 of 6 Jus Now tracks). Credit order is preserved end-to-end today; a test pins it.
-- **Match on the MusicBrainz artist MBID, never on names or `artists.id`** — one act is credited under two names on one label (`DJ Die` ×31 / `Die` ×15, same MBID); two different acts share the name "Sure Thing" on the same label. And **identify labels by `mb_label_id`, never by name-fold**: two enabled labels can fold identically (the namesake class the merge/alias machinery exists for), and a fold-keyed rules map is last-write-wins — one operator's scope silently governing a label he never ruled.
-- **Forward-only, and now atomic.** Scope changes what the next crawl writes; it never deletes, hides, or filters stored rows. Mode + rules are one transactional write on `update_label` — the invalid states (allowlist with zero rules; a mode switch racing its rule set) are unrepresentable, not policed by call-ordering conventions.
-- **The re-arm is a watermark, not a browse.** A scope/enable write stamps `labels.scope_changed_at` and nothing else. The crawl tick — the only process allowed to spend the shared 1 req/s MusicBrainz budget — revives the label's already-walked release nodes through the browse it performs anyway. Termination is by watermark comparison; there is no second HTTP path and no operator-request-deadline hazard.
-- **Check MusicBrainz for an existing sub-imprint before scoping — and the check is automatable.** Med School is its own MB Imprint entity (168 releases) with a machine-readable `label ownership` edge to Hospital; 3 Beat Breaks likewise. The triage pass queries `?inc=label-rels` and refuses to propose a scope when an imprint child already covers the boundary. The overlay is for Gutterfunk-shaped labels: one logo, one Discogs entry, one catalogue, genuinely mixed output — where an MB split would be a wrong edit.
+**`seed_state` is the label-level default. Artist rules are exceptions to it.**
+
+|                                        | label **enabled**                                            | label **disabled / undecided**                              |
+| -------------------------------------- | ------------------------------------------------------------ | ----------------------------------------------------------- |
+| no matching rule                       | store                                                        | skip                                                        |
+| artist **block** (per-label or global) | **skip their records** (Gutterfunk enabled, Jus Now blocked) | — (redundant; inert)                                        |
+| artist **allow** (per-label or global) | — (redundant; inert)                                         | **store their records** (Virgin disabled, Dillinja allowed) |
+
+- **One quantifier everywhere: FIRST credit.** A rule fires on a track iff the track's first credited MB artist MBID matches. Measured (Gutterfunk census, 130 recordings): block-FIRST has zero collateral on guest features and zero leak on off-lane records; block-ANY kills genuine label tracks where a blocked act guests; block-ALL leaks off-lane records rescued by one unblocked guest. Allow-FIRST is the mirror: Dillinja _allowed_ imports records **he is billed on**, not every pop record he guests on.
+- **Two scopes:** global ("never/always their records, anywhere" — Jus Now / Dillinja) and per-label ("their records on _this_ label" — a genre-crosser's off-genre works on an enabled label). **Precedence: per-label beats global** (the operator's specific act wins); within a scope an artist carries at most one verdict (unique key).
+- **Fail-safe by construction, both directions.** A credit with no usable MBID (bare-name, `["Unknown"]`, Various Artists) matches no rule, so the track falls to the label default — never a silent loss, never a silent import. The invalid states v1 policed (empty allowlist storing nothing; mode-switch races) are **unrepresentable**: there are no modes.
+- **Match on MB artist MBIDs, never names or `artists.id`** (one act credited two ways ×46 rows; two acts sharing one name on one label; `artists.mbid` nullable/non-unique/occasionally wrong). **Identify labels by `mb_label_id`, never name-fold alone** (namesake folds are last-write-wins in a map — the Radar Records class).
+- **Forward-only.** Rules change what the next crawl (and tap) _takes_; nothing already stored is touched. Removal stays with fluncle-catalogue-prune.
+- **The gate is still free.** All identities the rules need (`creditMbids` per track, `mbLabelId` per release) are already in memory at the storage gate (crawl.ts:1283–1288, :1220) — zero new HTTP, zero hot-path SQL; rules ride the per-tick memo like `enabledLabelFolds`.
+- **Check MB for an existing sub-imprint before ruling artists** — automatable via `?inc=label-rels` (Med School: own Imprint entity, `label ownership` edge to Hospital; 3 Beat Breaks). Artist rules are for boundaries MB cannot model (Gutterfunk: one imprint, mixed output).
+
+### What today's system does (verified, the gap this fills)
+
+An artist's releases on a non-enabled label are _walked_ (the discovery leg runs regardless — crawl.ts:1365) and **permanently refused** at the storage gate; the only bypass is operator certification via publish.ts. The capture ladder's "qualified artist" tier prioritizes buying for _already-stored_ rows and never overrides storage; `record_demand` re-orders the walk, never the gate. Every non-test `tracks` writer enumerated: crawl.ts (gate), label-releases.ts (tap, enabled labels only), publish.ts. So a Dillinja record on Virgin is fetched, inspected, discarded — that is the missing cell the **allow** fills, and Jus Now on Gutterfunk is the cell the **block** fills.
 
 ## 1. Context & goals
 
-The storage gate is label-level: one `seed_state` stores or skips a label's whole catalogue. Triage rounds keep stranding mixed-genre labels in `unclear` — Gutterfunk (DJ Die's imprint: mostly DnB, some dub/soul/soca), YUKU, Crucast, Echowide, Sneaker Social Club, Candy Mountain, Nice Up Records. The operator ruled (2026-07-31): per-label artist scoping, Gutterfunk pilot.
+Triage keeps stranding mixed-genre labels in `unclear`, and the label-level gate cannot express either "this act never" or "this act always". Operator rulings (2026-07-31 → 08-02, interview-ratified): the exception model above; pilot = global-block Jus Now + plain-enable Gutterfunk.
 
-Honest calibration:
+Calibration:
 
-- **In reach:** exact track-level scoped storage; triage proposing scoped enables with per-rule evidence; an admin surface; the pilot.
-- **In reach with stated limits:** back-catalogue capture after a scoped enable. The constraint is **not** the MusicBrainz request rate (900 fetches ≈ 17 min of wall clock at the 1.1 s floor) — it is the crawl tick's release half-batch × cadence: `FLUNCLE_CRAWL_NODES=30` deployed, `pickNodes` reserves `ceil(limit/2)` = 15 release slots/tick, ~5.6 ticks/h → **≈84 release expansions/h upper bound**, in contention with the pending frontier. Hospital-scale (1,019 releases) ⇒ ≥12 h. Stated on the board (§7), not hidden.
-- **Sparse upstream, not absent:** MB _does_ carry recording-level remixer relations, free in the crawler's existing request by extending its `inc` string (+2.8 % payload, zero extra HTTP) — but coverage on the pilot label is ~4.5 % of track rows. v1 does not scope on remixers; §9 stages the remixer-override refinement with the data path already named.
+- **In reach:** exact FIRST-credit exception storage both directions; triage proposing per-label rules with evidence; admin + CLI surfaces; the pilot; the enabled-label backfill.
+- **In reach with stated limits:** back-catalogue arrival after a rule/enable. The constraint is the crawl tick's release half-batch × cadence (deployed `FLUNCLE_CRAWL_NODES=30`, 15 release slots/tick, ~5.6 ticks/h → ≈84 release expansions/h ceiling), not the MB request rate. Hospital-scale ≥12 h; stated on the board.
+- **Sparse upstream, not absent:** MB remixer relations exist in the crawler's request for +2.8 % payload but cover ~4.5 % of pilot rows; v1 does not scope on remixers (§9.3).
 
 ## 2. Data model
 
-### 2.1 `labels` columns
+### 2.1 `artist_rules` (one table, both scopes)
 
-- **`scope_mode`** — nullable text, app-level enum (`blocklist` in v1; the column accepts `allowlist` for v2 without migration). **NULL = open** (today's behaviour). No DDL default (avoids the populated-table rebuild hazard; verified: generates a bare `ALTER TABLE labels ADD scope_mode text;`).
-- **`scope_changed_at`** — nullable text. The re-arm watermark **and** the scope ruling's own clock. Stamped on every scope write. `ruled_at` is **never** touched by a scope-only write — it is the seed-ruling's provenance, load-bearing in `mergeLabel` precedence and the D7 bootstrap exemption; one column cannot arbitrate two independent rulings.
+| column                                           | type          | notes                                                                                                                                                                                                                                 |
+| ------------------------------------------------ | ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `id`                                             | text PK       | `arl_…`                                                                                                                                                                                                                               |
+| `artist_mbid`                                    | text notNull  | **the match key**, from the MB payload                                                                                                                                                                                                |
+| `artist_name`                                    | text notNull  | credited spelling at ruling time (display; never matched)                                                                                                                                                                             |
+| `artist_spotify_id`                              | text nullable | **the tap bridge** (§3.5): resolved server-side at rule-write from the MB artist's own Spotify url-rel (verified present for Jus Now), falling back to an `artists` row carrying both ids; null = tap-blind rule, surfaced not hidden |
+| `verdict`                                        | text notNull  | `allow \| block`                                                                                                                                                                                                                      |
+| `label_id`                                       | text nullable | **NULL = global**; else the label the exception is scoped to. No FK/cascade (matches `tracks.label_id`)                                                                                                                               |
+| `resolved_mbid` / `resolved_name` / `checked_at` | text nullable | drift audit, written by the triage re-audit sweep (§8) — never by a dialog-render MB call                                                                                                                                             |
+| `source`                                         | text notNull  | `operator \| triage`                                                                                                                                                                                                                  |
+| `created_at`, `updated_at`                       | text notNull  |                                                                                                                                                                                                                                       |
 
-Scoped ⇔ `seed_state = 'enabled' AND scope_mode IS NOT NULL`. **No fourth seed_state** — every reader keyed on the literal `'enabled'` (gate memo, seed re-arm crawl.ts:591, capture ladder, tap worklist, the one partial index `labels_label_releases_queue_idx`) stays untouched. A `disabled`/`undecided` label may carry a mode+rules harmlessly (seed gate runs first), which lets triage stage a scope alongside an enable in one ratification.
+Indexes (plain ASC; partial-unique because SQLite treats NULLs as distinct):
 
-### 2.2 `label_artist_rules`
+- `uniqueIndex("artist_rules_label_artist_idx").on(labelId, artistMbid).where(label_id is not null)`
+- `uniqueIndex("artist_rules_global_artist_idx").on(artistMbid).where(label_id is null)`
+- `index("artist_rules_label_id_idx").on(labelId)` (board reads)
 
-| column                                           | type          | notes                                                                                    |
-| ------------------------------------------------ | ------------- | ---------------------------------------------------------------------------------------- |
-| `id`                                             | text PK       | `lar_…`                                                                                  |
-| `label_id`                                       | text notNull  | no FK/cascade (matches `tracks.label_id`)                                                |
-| `artist_mbid`                                    | text notNull  | **the match key**, from the MB payload                                                   |
-| `artist_name`                                    | text notNull  | credited spelling at ruling time (display; never matched)                                |
-| `resolved_mbid` / `resolved_name` / `checked_at` | text nullable | drift audit, written by the triage re-audit sweep (§8), never by a dialog-render MB call |
-| `source`                                         | text notNull  | `operator \| triage`                                                                     |
-| `created_at`, `updated_at`                       | text notNull  |                                                                                          |
+### 2.2 `labels` columns
 
-One index: `uniqueIndex("label_artist_rules_label_mbid_idx").on(labelId, artistMbid)` — it also serves the `label_id` prefix seek, so no second index. Plain ASC. Migration `0145_*` via `db:generate`; `oxfmt` the whole output incl. `meta/*.json`; the diff must contain only the two ALTERs + CREATE TABLE + its index (any index churn = snapshot drift, a separate fix).
+- **`scope_changed_at`** — nullable text: the label re-arm watermark, stamped on enable and on any per-label rule change for the label. (`ruled_at` is never touched by rule writes — it is the seed-ruling's provenance, load-bearing in merge precedence and the D7 bootstrap.)
 
-Rejected (recorded so they are not relitigated): artist-level seed state (global; can't express per-label; row may not exist; collides with the capture ladder's `qualifiedArtists` _spend_ set); JSON column (the label entity's own no-denormalization precedent, schema.ts:3671); keying on `artists.id` (inherits conflated/duplicate rows; hot-path translation join; chicken-and-egg).
+### 2.3 `artists` columns
 
-### 2.3 Merge behaviour (specified, not sketched)
+- **`rearm_requested_at`** — nullable text on… **no**: allow re-arms key on the _rule_, not an `artists` row (the row may not exist). The artist re-arm watermark lives on the rule row: **`artist_rules.rearmed_at`** (nullable text; null = the crawl tick owes this allow a back-catalogue walk). Global and per-label allows both use it.
 
-- **409 `merge_scope_conflict` whenever both `scope_mode` are non-null and differ** — regardless of `ruled_at` (which stamps seed rulings, not scopes). `LabelScopeConflictError` clones the existing 409 plumbing (orpc/admin-labels.ts:108).
-- **Rule sets never union across a merge.** A naive repoint collides on the unique index; `update or ignore` + delete (the alias recipe) silently _unions_, and a union across modes inverts meaning ("only these" becomes "ban these"). Instead: the survivor keeps its own set; the loser's rows are dropped in the batch (`delete from label_artist_rules where label_id = <loser>`), reported as `droppedRules: N` on `MergeLabelResult` so the operator re-authors deliberately.
-- Mechanics the builder needs: `LabelMergeRow` + `getLabelMergeRow`'s select list gain `scope_mode`/`scope_changed_at`; the reconcile UPDATE (statement 5) carries them; the rules delete joins the existing `db.batch(_, "write")`. Orphan rule: the only production `delete from labels` is mergeLabel's statement 0 (verified), so the batch's delete is the complete story; the prune skill's label deletes gain the same companion delete.
+Migration `0146_*` (0145 was consumed by nothing — verify journal at build time) via `db:generate`; nullable columns, no DDL defaults (no populated-table rebuild); `oxfmt` whole output incl. `meta/*.json`; the diff must be exactly the ALTERs + CREATE TABLE + its indexes.
+
+Rejected (recorded): label `scope_mode` (v1 — superseded by the exception model; its whole hazard class evaporates); artist-level seed_state on `artists` (row may not exist; collides with the capture ladder's _spend_ set); JSON columns (the label entity's ratified precedent, schema.ts:3671); keying rules on `artists.id` (conflated/duplicate rows; hot-path join; chicken-and-egg).
+
+### 2.4 Merge behaviour
+
+`mergeLabel`: per-label rules **never union** across a merge (a naive repoint collides on the partial-unique index; an `or ignore` union can invert operator intent). The survivor keeps its rules; the loser's per-label rules are deleted in the batch, reported `droppedRules: N` on `MergeLabelResult` for deliberate re-authoring. Global rules are untouched by label merges. `LabelMergeRow`/`getLabelMergeRow` + the reconcile UPDATE gain `scope_changed_at`. The prune skill's label deletes gain the companion rules delete.
 
 ## 3. The crawler
 
-### 3.1 The gate (per-track filter, MBID-first identity)
+### 3.1 The gate
 
-The memo becomes two maps, built once per pass alongside `listLabels("enabled")` (which picks up `scope_mode` for free once `LABEL_COLUMNS`/`LabelRow`/`toLabelItem` gain it) plus one bounded read of `label_artist_rules` for enabled labels:
-
-```ts
-scopeByMbid: Map<mbLabelId, ScopeEntry>; // exact — labels.mb_label_id is UNIQUE
-scopeByFold: Map<labelFold, ScopeEntry | "ambiguous">; // fallback for MBID-less labels
-```
-
-Lookup order mirrors `linkTracksToLabel`: the release's `mbLabelId` (in hand at crawl.ts:1220) first, fold fallback second. **Fold-collision rule:** if all colliders are unscoped → `{ mode: null }` (today's behaviour, zero regression); if any collider is scoped → treat as unscoped-open for storage **but** log `crawl.scope-ambiguous` — never apply a scope the operator didn't attribute to that entity. (The draft's claim that fold-keying "agrees on aliased spellings" was false — the gate has a known alias blind spot today, out of scope here but noted in §13.)
-
-Filter, inside the existing enabled-label block:
-
-- `mode === null` → keep all.
-- `mode === "blocklist"` → drop a candidate iff its **first non-null** `creditMbids` entry is in the set; keep otherwise — including candidates with no usable credit identity (blocklist is conservative about dropping, so the dead-in-practice degraded path fails **open**; verified: 0 of 133 pilot rows lack recording credits).
-
-Exact `ensureAlbum` form (one resolve, never two — the resolved id is also the layer-2 dedupe key):
+Per-tick memo (built with `listLabels("enabled")` + one bounded `artist_rules` read; cleared at crawl.ts:1417):
 
 ```ts
-const kept = applyScope(candidates, scope);
-const albumId = kept.length > 0 ? ((await ensureAlbum(...)) ?? null) : null;
+labelByMbid:  Map<mbLabelId, { labelId, enabled: boolean }>   // exact identity
+labelByFold:  Map<labelFold, { labelId, enabled } | "ambiguous">  // fallback; ambiguous → label default only, log crawl.scope-ambiguous
+globalAllow / globalBlock: Set<mbid>
+labelAllow / labelBlock: Map<labelId, Set<mbid>>
 ```
 
-`writeCatalogueTracks(kept, albumId)`; the artist-entity link map is rebuilt **from `kept`** (it is built from `candidates` today — the one downstream line that does not follow automatically); `linkTracksToLabel` / `linkTracksToAlbumId` / `stampRemixerRoles` (lives in artists.ts:1011) key off `writtenIds` and follow.
+Decision per candidate track (first non-null entry of `creditMbids` = `first`):
 
-**Unfiltered on purpose (stated so nobody "tightens" them):** the artist-hop discovery leg (crawl.ts:1372–1390) walks every credit — scope bounds storage, never discovery; `rearmSeedLabels`' `seed_state='enabled'` guard keeps scoped labels re-arming.
-
-Dedupe caveat, pinned in a test: layer 2 (`existingAlbumTitleFolds`) is an album-scoped title fold, so a widening re-walk stores "the newly permitted rows _except_ same-album title-fold twins" — correct Apple-twin behaviour, now stated.
-
-### 3.2 Pass outcome recording
-
-`expandRelease` writes a compact debug string into `crawl_frontier.note` at settle (`stored=N skipped_held=N skipped_scope=N`) — **a human forensic aid, not a queryable index** (the column is unindexed over a ~90k-row table; nothing may build behavior on scanning it). The re-arm needs no refused-set query — termination is the watermark (§3.3).
-
-### 3.3 The re-arm (watermark + existing walk; no second HTTP path)
-
-**Why:** nothing re-expands a `done` release node — `enqueue` is `on conflict (id) do nothing`, the forward browse has no early-stop but cannot revive nodes, and the tail re-arm early-stops on zero-new (pinned at crawl.integration.test.ts:1369). So enabling a label whose releases were already visited under other seeds' subtrees silently loses them **today, overlay or not**. There is no test for enable-after-walk; that absence is why the gap survived. This unit ships first and fixes it for plain enables and scoped enables alike.
-
-**Design:**
-
-1. Any write that enables a label or changes its scope stamps `labels.scope_changed_at` (the enable path stamps it too). **The write does nothing else** — no browse in the Worker request path (the MB client's rate gate is per-isolate; browsing from a PATCH handler doubles the real request rate against a service that 503-throttled Fluncle's IP once already, and a 5,000-release browse blows the request deadline).
-2. In the crawl tick, `rearmScopedLabelReleases(): Promise<number>` runs as a sibling of `rearmSeedLabels()` (called from `crawlCatalogue` next to crawl.ts:1450, reported as `CrawlPass.releasesRearmed`): select enabled labels `where scope_changed_at is not null` whose MB **label node** is `done` with `done_at < scope_changed_at`, flip those label nodes to `pending, cursor=0` (bounded like `REARM_BATCH`).
-3. `enqueueReleaseNodes` gains a re-arm mode, active only while expanding such a label node:
-
-```sql
-on conflict (id) do update
-  set state = 'pending', cursor = 0, hop = 0, label_slug = excluded.label_slug, updated_at = excluded.updated_at
-  where crawl_frontier.state = 'done' and crawl_frontier.done_at < :scopeChangedAt
+```
+verdict(first, labelId):
+  per-label rule for (labelId, first)  → its verdict        // specific wins
+  global rule for first                → its verdict
+  none                                 → label default (enabled ⇒ store, else skip)
 ```
 
-- **Terminates by construction:** re-expansion settles `done_at` past the watermark.
-- **`hop = 0` and `label_slug` repoint are required:** a release previously reached at hop 2 under another seed would otherwise queue behind every pending hop-0/1 node indefinitely (`pickNodes` orders `hop asc …`). `created_at` is deliberately untouched (old nodes sort early within the hop).
-- **Status filter, client-side:** drop `Bootleg` and `Pseudo-Release`, keep `Official`/`Promotion`/**status-absent** (7 of Gutterfunk's 37 lack status and are real records; `&status=official` on the browse would wrongly drop them).
-- **Gating:** the `do update` arm is active only in re-arm mode, so `enqueue`'s `rowsAffected` semantics — and the tail-early-stop test — are unchanged on every other path. Both get pinned tests (§12).
-- Co-released edge (first `label-info` entry belongs to another label): the walk's gate refuses it and it counts into `skipped_label` — noted, harmless.
-- `skipped`/`failed`/abandoned nodes are **not** touched: `skipped` = no MB release; `failed` is owned by its own exponential backoff (the `rearmSeedLabels` doctrine, crawl.ts:559); abandoned stays abandoned.
+- `first === null` (no usable identity) → label default. Fail-safe both directions.
+- Exact `ensureAlbum` form (one resolve; the id is also the layer-2 dedupe key): `const kept = applyRules(candidates, …); const albumId = kept.length > 0 ? ((await ensureAlbum(...)) ?? null) : null;` — a fully-excluded release mints no album row. **New in v2:** the gate now runs for _non-enabled_ labels too when an allow could match — the enabled-only short-circuit at crawl.ts:1312 becomes the `verdict` call; a non-enabled release with no allow hits is the same no-op it is today.
+- The artist-entity link map is rebuilt from `kept` (it is built from `candidates` today); `linkTracksToLabel` / `linkTracksToAlbumId` / `stampRemixerRoles` (artists.ts:1011) key off `writtenIds` and follow.
+- **Unfiltered on purpose:** the artist-hop discovery leg walks every credit (rules bound storage, never discovery); `rearmSeedLabels`' enabled-guard is untouched.
+- Album dedupe caveat pinned in a test: layer 2 is an album-scoped title fold, so a widening re-walk stores "newly permitted rows except same-album title-fold twins".
+- Storing on a non-enabled label via an allow: `ensureLabel` already mints/links label rows independent of seed_state; hub counters and `/label/<slug>` render stored rows in the unnamed register exactly as for any catalogue row — no read-side change (crawl-scope-never-storage's read half is untouched).
 
-Narrowing fires nothing (a narrowing re-walk is a guaranteed no-op — nothing deletes); the server stamps the watermark **only on enable or widening** (mode set, rule removed from a blocklist), computable from the write's diff.
+### 3.2 Pass outcome note
+
+`expandRelease` writes a compact debug string to `crawl_frontier.note` at settle (`stored=N skipped_held=N skipped_rule=N`) — forensic aid only, unindexed, nothing may query it.
+
+### 3.3 Re-arms (watermarks; all work inside the crawl tick)
+
+**Why (verified):** nothing re-expands a `done` release node — `enqueue` is `on conflict do nothing`, the forward browse cannot revive, the tail re-arm early-stops on zero-new (pinned, crawl.integration.test.ts:1369). Enabling a label whose releases were visited under other seeds silently loses them **today**; there is no enable-after-walk test. This unit ships first.
+
+- **Label leg:** enable/rule writes stamp `labels.scope_changed_at` — nothing else in the request path (the MB client's rate gate is per-isolate; a browse in a PATCH handler doubles the real request rate — the 2026-07-19 throttling incident class — and big labels blow the request deadline). In the tick, `rearmScopedLabelReleases()` (sibling of `rearmSeedLabels`, reported as `CrawlPass.releasesRearmed`) flips label nodes `done` with `done_at < scope_changed_at` back to pending; `enqueueReleaseNodes` gains a re-arm mode: `on conflict (id) do update set state='pending', cursor=0, hop=0, label_slug=excluded.label_slug where crawl_frontier.state='done' and crawl_frontier.done_at < :watermark`. Hop reset + `label_slug` repoint are required (a hop-2 node otherwise queues behind the world); `created_at` untouched. Client-side status filter: drop `Bootleg`/`Pseudo-Release`, keep status-absent (7 of Gutterfunk's 37 are status-less and real; `&status=official` would wrongly drop them). The `do update` arm is active only in re-arm mode (the tail-early-stop semantics stay pinned).
+- **Artist leg (allows):** an allow write leaves `rearmed_at` null; the tick's `rearmAllowedArtists()` mints-or-revives the artist's browse node (`musicbrainz:artist:<mbid>`, hop 0) for every allow rule with `rearmed_at is null`, stamps `rearmed_at`, and the normal walk does the rest (each release then passes the gate, where the allow admits the billed records). **Allowed artists also join the daily re-arm set** — their artist nodes re-browse tail-first like enabled labels' nodes, so future releases on non-enabled labels keep arriving.
+- **Backfill (operator-ratified):** after PR 1 lands, stamp `scope_changed_at` on **all enabled labels** once — the tick drains the rounds-1/2 back-catalogue holes over days at the ~84/h ceiling, safe by idempotence.
+- Untouched states: `skipped` (no MB release), `failed` (owned by its backoff — the crawl.ts:559 doctrine), abandoned.
 
 ### 3.4 Counters (wire-compatible)
 
-`tracksSkipped` **stays, as the sum** — it is on the wire in the contract, the pinned box CLI, and the baked crawl-sweep script; silently repurposing it makes the box report garbage until the pin moves. Three **additive** fields: `tracksSkippedHeld` / `tracksSkippedLabelGate` / `tracksSkippedArtistScope`, through the pass summary, cron JSON, and ledger.
+`tracksSkipped` stays as the sum (pinned box CLI + baked sweep script read it); additive fields `tracksSkippedHeld` / `tracksSkippedLabelGate` / `tracksSkippedArtistRule` (+ `tracksAllowedIn` for allow-admitted rows) through pass summary, cron JSON, ledger.
 
-### 3.5 The freshness tap
+### 3.5 The freshness tap — scope-aware via the Spotify bridge (operator's design)
 
-Scoped labels are excluded from the tap worklist: `where seed_state = 'enabled' and scope_mode is null` — **in the SQL**, not the TS refine (or `WORKLIST_OVERSCAN` is consumed by scoped labels and unscoped ones starve). The predicate implies the existing partial index's condition, so `labels_label_releases_queue_idx` still serves it with a residual filter — **no new index** (a builder adding one has misread this). Verified single entry point (`listProbeLabels` → `probeLabelReleases` → `backfill_label_releases`; no per-label targeting). Priced honestly: a scoped label's new releases arrive only via the MB re-walk — scoping a Spotify-forward label makes it the least fresh label in the archive, and a release Spotify has but MB lacks never lands. That cost lands on exactly the mixed modern labels this feature serves; the operator accepts it per scoped label knowingly (it is in the dialog copy, §7).
+The tap keeps serving scoped labels; **no exclusion**. `parseProbeTrack` keeps the per-track Spotify artist **ids** it already receives (today it discards them, label-releases.ts:334 — the album parse already keeps ids at :312). The tap's write leg drops a track whose FIRST Spotify artist id matches a blocked rule's `artist_spotify_id` (per-label for that label, or global) — same quantifier, fail-open (no id / unresolved bridge → keep, the tap's status quo). Resolution happens at rule-write time from MB url-rels (authoritative, no fuzzy matching); a rule with a null bridge is **tap-blind** and marked so in the dialog and triage report (the crawler still enforces it exactly). Allows don't apply to the tap (it probes enabled labels only; allowed artists on non-enabled labels are served by the artist re-arm leg). The tap worklist SQL is unchanged (no exclusion clause; no new index — a builder adding one has misread this).
 
-## 4. Matching semantics — the measured ground (corrected numbers)
+## 4. Measured ground (corrected census)
 
-Census: Gutterfunk `c7a4f6d6-af59-4376-9d77-722c14e392fb` — 37 releases, 133 track rows, 130 recordings, **50 distinct credited artist MBIDs** (51 name strings). Corrections from the panel's re-measurement: block-ANY drops 9 (collateral incl. **two** Nuff Pedals × Maddslinky tracks); block-ALL drops 3 and leaks **4 of 6** Jus Now tracks (two are solo-credited); block-FIRST drops 7 with zero collateral/zero leak. `Maddslinky` never appears as a first credit — a blocklist rule on it is **inert**, which is why per-rule census counts are mandatory at ratification (§8).
+Gutterfunk `c7a4f6d6`: 37 releases, 133 track rows, 130 recordings, 50 credited artist MBIDs. Block-FIRST on {Jus Now} drops 6; block-ANY 9 (collateral: two Nuff Pedals × Maddslinky tracks); block-ALL 3 (leaks 4 of 6 Jus Now tracks). Maddslinky first-credit count = 0 → an inert rule; per-rule census counts are mandatory at ratification. Crystal Waters is **not** blocked: both "Gypsy Woman" pressings are the DieMantle RaveYard DnB remix credited solely to her (remixer exists only as a sparse recording-level rel) — the record stays in. DJ Die credited as "DJ Die"×31 / "Die"×15 (one MBID); two "Sure Thing" entities on one label — the MBID-keying proofs. Allow-shape lesson: "one artist" is often several MBIDs (DJ Die alone 44/130; +DieMantle 57/130) — allow sets need collaboration-entity expansion in the census.
 
-**Pilot ruling, corrected by its own census:** blocklist **{ Jus Now }** — keeps 124/130, drops all six soca tracks. Crystal Waters is deliberately **not** blocked: both "Gypsy Woman" pressings are the _DieMantle RaveYard mix_ — a genuine label-boss DnB record credited solely to Crystal Waters (the remixer exists only as a recording-level `remixer` relation). Blocking her would drop it — the original-of-remix class inverted. The remixer-override refinement that would make blocking her safe is staged (§9.3) with its data path verified.
-
-The MB-alternative decision rule (goes into docs/label-entity.md): prefer an existing MB entity when the boundary is a **product line** — a sub-imprint with its own identity that MB models (`3 Beat Breaks`; **Med School**: own Imprint entity, 168 releases, machine-readable `label ownership` edge to Hospital — and Fluncle already carries both as separate enabled rows). The triage pass automates the check (§8). Use the overlay when the label is one imprint with mixed output (Gutterfunk: no type, no label-rels, one Discogs entry). Never reach for a ℗-holder entity as a _mechanism_ — ownership ≠ genre; use it when it happens to coincide (the shipped `3Beat Productions Limited` precedent).
+MB-alternative rule (goes to label-entity.md): prefer an existing MB entity when the boundary is a product line (Med School, 3 Beat Breaks — machine-checkable via `?inc=label-rels`; triage refuses to propose rules when an imprint child covers the boundary). Use artist rules when the label is one imprint with mixed output. Never use ℗-holder entities as a mechanism.
 
 ## 5. Contracts & API
 
-- **`update_label`** (PATCH `/admin/labels/{id}`, operator — already `.use(adminAuth).use(operatorGuard)`): input becomes
-
-  ```ts
-  { id, seedState?: LabelSeedState, scope?: { mode: "blocklist", rules: Array<{ artistMbid, artistName }> } | null }
-  ```
-
-  with an at-least-one refine. **Mode + rules write atomically in one `db.batch(_, "write")`** — the store-nothing window, the ordering ritual, and the mode/rules race are unrepresentable. Validation: `scope.rules` non-empty when `scope` is non-null (`409 scope_without_rules`); `scope: null` clears the mode and **retains rule rows inert** (cheap undo; a later re-scope reuses them). Semantics per field: `seed_state = coalesce(:seedState, seed_state)`; `ruled_at` stamped **only** when `seedState` present; `scope_changed_at` stamped only on enable/widening (§3.3). `LabelAdminItemSchema` gains `scopeMode` + `scopeRuleCount` additive-optional (the ratified compatibility pattern) — required for the triage pilot's round-trip check.
-
-- **`list_label_artist_rules`** (GET `/admin/labels/{id}/artists`, admin tier) — the read for board, dialog, and scripts. Same `{id}` key space as `update_label` (one flow, one key; the slug-keyed newer ops are a separate lineage).
-- Both ops: entries in `ADMIN_ROUTE_OPS` + `EXPECTED_TIERS`; `verb_noun` passes with no verb-set edit (`list` approved; no `rearm` op exists — the re-arm has **no HTTP surface**, it's the watermark + crawl tick).
-- The dialog's artist typeahead is a **`createServerFn`**, not an oRPC op (page-local admin read behind `isAdminRequest()`, the artists.tsx debounced-search precedent), returning `{ id, name, mbid, trackCount }` limit 20 — stated here so PR 4 doesn't discover the coverage gate late.
-- No MCP entry, no `PUBLIC_OPERATION_IDS`, no registry change.
+- **`update_label`** (PATCH `/admin/labels/{id}`, operator): `{ id, seedState? }` with the coalesce semantics (`ruled_at` stamped only when `seedState` present; enable stamps `scope_changed_at`). Simpler than v1 — no scope payload here.
+- **`list_label_artist_rules`** (GET `/admin/labels/{id}/artists`, admin) — per-label rules for board/dialog/scripts.
+- **`replace_label_artist_rules`** (PUT `/admin/labels/{id}/artists`, operator): transactional whole-set swap `{ rules: [{ artistMbid, artistName, verdict }] }`; server resolves `artist_spotify_id` per rule at write; stamps `scope_changed_at`; rejects bare names. `replace` is the blessed whole-set verb.
+- **Global rules:** `list_artist_rules` (GET `/admin/artist-rules`, admin), `add_artist_rule` (POST, operator, `{ artistMbid, artistName, verdict }`), `remove_artist_rule` (DELETE `/admin/artist-rules/{id}`, operator) — `add`/`remove`/`list` all approved verbs. An allow add leaves `rearmed_at` null (the tick picks it up).
+- All ops: `ADMIN_ROUTE_OPS` + `EXPECTED_TIERS` entries; contract-only oRPC; no MCP/registry/public-ids changes. The dialog's artist typeahead is a `createServerFn` (page-local admin read; the artists.tsx precedent), not an op.
 
 ## 6. CLI
 
-- `fluncle admin labels update <slug> [--seed-state <state>] [--scope open|blocklist] [--artists-file <json>] [--rewalk]` — one command, one op. `--scope blocklist` requires `--artists-file`; `open` clears mode (rules retained); `--rewalk` stamps the watermark without changing the scope (the operator's manual re-walk lever). All value-taking flags join `stringOptions` (build-gated; the cli.test.ts:991 invariant fails otherwise). The `--artists a,b,c` inline form is cut — 36-char UUIDs by hand serve nobody.
-- `fluncle admin labels artists <slug>` — read the rule set (drift columns included).
-- Success copy gains a scoped arm in the operator register ("Takes everything except N artists from it." — see §7 copy).
+- `fluncle admin labels update <slug> [--seed-state <state>] [--rewalk]` — `--rewalk` stamps `scope_changed_at` bare.
+- `fluncle admin labels artists <slug>` (list) / `--replace --rules-file <json>` (whole-set swap with verdicts).
+- `fluncle admin artists rule <artist-mbid> --verdict allow|block [--name <n>]` / `fluncle admin artists rules` (global list) / `… unrule <id>`.
+- All value-taking flags join `stringOptions` (build-gated). Success copy uses the ratified vocabulary (§7).
 
-## 7. Admin surface (`/admin/labels`)
+## 7. Admin surfaces
 
-- **Entry:** "Scope it…" in the row `⋮` (scoping never competes with the two ruling buttons — the placement contract). Dialog copied from the `ManageLinksDialog` **pattern** (route-local in artists.tsx, not a shared component).
-- **Dialog:** the rule chips (name + MBID + drift marker when `resolved_mbid` differs); the typeahead + paste-an-MBID field; **one plain sentence** rendered from the live rule — copy per the panel's Flat-Copy correction: **"Take everything except these 2 artists from it."** (never "seed only…" — _seed_ is this page's label-level verb); one clause on the boundary: _"A scope narrows which artists the next crawl takes from it. Everything already here stays."_; one clause on the tap trade-off (§3.5). **No live MB call and no match count in the dialog** — the DB cannot answer "what would this rule admit" (credit MBIDs aren't persisted; most crawled rows have no artist edges), and a near-zero count at ruling time is worse than none. The census lives at ratification (§8), where the MB payload is present.
-- **Board:** a quiet mode-distinct chip — `Except 3 artists` — beside `SeedStateChip` (never one label for two modes' opposite meanings; no loud states — the empty-scope state is a 409, unreachable). While a re-walk is in flight, the row's identity line carries a transient `· N releases queued` from **one grouped bounded read** of `crawl_frontier` (`label_slug` now repointed by the re-arm, so the group-by is honest) for the visible page's scoped rows — the operator's answer to "is it working?" on the page where he acted. The scoped-section intro carries the one-line count of scoped labels (the "which of my labels are scoped" view).
-- Route gains `validateSearch` for `?label=<slug>`; the producer of that link is the triage ratification page (each scoped proposal deep-links its label).
-- Mutations invalidate `LABELS_KEY`; inline `role="alert"` errors; no toasts; the react-query/loader conventions of the exemplar hold.
-- **Smokes:** shell-smoke stays green (dialog queries must not throw on mount); add `/admin/labels` to `admin-touch-smoke` `SURFACES` (verified absent today); fixture updates ship in the same PR as the UI change.
-- **No new attention source** (the label-alias precedent: crawl-volume review is a page section, not a queue row). Scoped-label maintenance is the triage re-audit (§8) — which now actually exists in the apply script.
+Ratified vocabulary: **take** is the acquisition verb. Label row `⋮`: "Block an artist on it…" (enabled rows) / "Allow an artist from it…" (disabled rows). Chips (quiet, mode-distinct): `Except 2 artists` (enabled + blocks) / `Only 3 artists` (disabled + allows). Artists-row global actions: "Never take their records" / "Always take their records" (+ a quiet badge on ruled artists). Boundary clause everywhere a rule is edited: _"Rules change what the next crawl takes. Everything already here stays."_
+
+- Dialog on the `ManageLinksDialog` pattern (route-local, copy it): chips with per-rule drift + tap-blind markers; typeahead + paste-an-MBID; **no live MB calls, no match counts** (the census lives at ratification where the MB payload exists; a DB-side count is structurally near-empty — verified). Per-rule census counts render at triage ratification instead.
+- Board: while a re-walk is in flight, the row's identity line carries `· N releases queued` from one grouped bounded `crawl_frontier` read for the visible page. Scoped-section intro carries the count of rule-carrying labels. `validateSearch` for `?label=<slug>` (producer: the triage ratification page's per-label links).
+- `/admin/artists` gains the global-rule action in its row menu; the artists board shows the badge.
+- Smokes: shell-smoke stays green; add `/admin/labels` to touch-smoke `SURFACES` (verified absent); fixtures ship with the UI change. No new attention source (the label-alias precedent; maintenance = the triage rescope round, which exists in the script per §8).
 
 ## 8. The triage skill
 
-- **Verdict schema:** `dnb` rows gain optional `scope: { mode: "blocklist", artists: [{ name, mbid, evidence, firstCreditCount }] }`. Hard rules in the brief: MB entity **conflation stays `unclear`** (a scope is never the dumping ground for an entity problem); an **imprint-child check** runs first (`/label/<mbid>?inc=label-rels` — an existing imprint/`label ownership` child covering the boundary means "enable the child", not a scope; the Med School shape, automated); a blocklist entry with **zero first-credits on the census is rejected as inert** (the Maddslinky lesson). The share test replaces the draft's arbitrary ~8-artist cap: propose blocklist when the excluded artists' first-credit share is ≤ Y% (default 15) of recordings; otherwise `unclear` (allowlist proposals return in v2 with their own share test).
-- **The census is costed and gated:** phase 1 stays the cheap 25-release release-credit classify; only mixed-verdict labels get a phase-2 census (`?inc=artist-credits+recordings`, ≤100/page, capped pages with the sampling caveat stated in evidence). Census-bearing rounds drop the batch to 5 labels/agent — the budget is stated, not discovered.
-- **`pull-undecided.sh`** emits existing scope state; writes `calib-scoped.txt` for the brief.
-- **`apply-rulings.py`:** scoped rows write **one** `PATCH` (atomic scope+enable); pilot mode pilots a scoped label and verifies `scopeMode` + `scopeRuleCount` round-trip. A new **`rescope` mode** reads `?seedState=enabled` scoped labels and PATCHes rules-only — the maintenance loop the no-attention-source argument depends on (it did not exist in the draft's pointer). The re-audit also refreshes `checked_at`/`resolved_*` per rule (the drift sweep — catches MB merges by comparing the response `id`; splits are surfaced by first-credit counts going stale).
-- **Ratification** leads with scoped proposals: label → mode + N artists, per-artist evidence **and per-rule first-credit count**, would-drop/would-keep census, already-stored rows per scoped-out artist (so ratification and any prune decision are one look). Local HTML with a path, per standing preference.
+- **Verdicts:** `dnb` rows may carry `rules: [{ artistMbid, artistName, verdict: "block", evidence, firstCreditCount }]` (enabled-shape: propose enable + blocks when off-lane first-credit share ≤ **15 %** — operator-ratified Y); `unclear`-avoidance for the disabled-mixed class: a new `dnb_partial` verdict proposing **keep disabled + allow rules** (the YUKU/Crucast shape), with collaboration-entity expansion in the census and per-artist evidence. **Global rules are never machine-applied:** agents may _suggest_ a global in prose (`globalSuggestion` note field); the operator authors globals by hand. Inert-rule guard: any proposed rule with zero first-credits on the census is rejected. Conflation stays `unclear`; the imprint-child check (`?inc=label-rels`) runs before any rule proposal.
+- **Census:** phase-2 (`?inc=artist-credits+recordings`, ≤100/page, capped + sampling caveat) only for mixed-verdict labels; census-bearing slices batch at 5 labels/agent.
+- **`pull-undecided.sh`:** emits existing rules per label; writes `calib-rules.txt` for the brief.
+- **`apply-rulings.py`:** enabled-shape rows = `PATCH {seedState:"enabled"}` + `PUT …/artists`; `dnb_partial` rows = `PUT …/artists` only (label stays as-is); pilot pilots a rule-carrying label and verifies the rule set + `scope_changed_at` round-trip; **`rescope` mode** reads enabled/ruled labels for maintenance rounds and refreshes `checked_at`/`resolved_*` (the drift sweep — MB merges caught by response-id comparison; splits surfaced by first-credit counts going stale).
+- **Ratification** leads with rule proposals: per-artist evidence + first-credit count + tap-bridge status + would-take/would-drop census; local HTML with a path.
 
-## 9. Staged (gated, not deferred)
+## 9. Staged (gated)
 
-1. **Allowlist mode** — gates: a census of ≥2 real allowlist customers from the waiting list; the would-store preview it structurally requires (see 2); collaboration-entity expansion in the census (DieMantle-class entities). The schema, gate plumbing, counters, and dialog all carry it with one enum value's work.
-2. **Persisted credit MBIDs** (`track_artist_mbids (track_id, position, artist_mbid)`) — the single enabler that makes three things exact at once: a truthful dialog match count, capture-ladder integration (Decision 2), and precise historical audits. Written by `expandRelease` from data already in hand.
-3. **Remixer-override on blocklist** — data path verified (`inc=…+recording-level-rels+artist-rels`, +2.8 % payload, zero HTTP): a first-credit-blocked track carrying a `remixer` rel to a non-blocked artist is kept. Unblocks blocking Crystal Waters without losing the DieMantle mix. Gate: decide the exact predicate after v1 ships and the counters show how often the class occurs.
+1. **Per-label allow-as-restriction previews** ("would-store" for big allow sets) — gated on real usage shapes from the first rescope rounds.
+2. **Persisted credit MBIDs** (`track_artist_mbids`) — the enabler for capture-ladder integration (Decision record #2), truthful dialog counts, and exact retroactive audits.
+3. **Remixer-override** — a first-credit-blocked track carrying a remixer rel to a non-blocked artist is kept (`inc` extension verified, +2.8 % payload); decide the predicate after v1 counters show the class frequency. Unblocks blocking Crystal Waters-class credits without losing label-boss remixes.
+4. **Capture veto** — scope × spend, revisit when 9.2 lands (operator ruling: v1 is storage-only; with the pilot's clean slate there is nothing mis-authorized to buy).
 
 ## 10. Sequencing
 
-1. **PR 1 — the re-arm unit:** `scope_changed_at` (columns only), the enable-path stamp, `rearmScopedLabelReleases` in the crawl tick, the `enqueueReleaseNodes` re-arm mode, `--rewalk`, and the enable-after-walk test that does not exist today. Standalone value; live from day one; the riskiest component shipped smallest.
-2. **PR 2 — schema + gate:** `scope_mode`, `label_artist_rules`, the memo maps, the filter, counters (§3.4), gate-outcome note, tap exclusion. Inert until a mode exists (tests seed modes by direct insert; the write path is PR 3).
-3. **PR 3 — contracts + CLI:** the atomic `update_label`, `list_label_artist_rules`, merge behaviour, CLI flags.
-4. **PR 4 — admin:** dialog, chips, queued-count read, validateSearch, smokes.
-5. **PR 5 — triage skill** (repo-only; `skills:install`).
-6. **PR 6 — the pilot (operator-gated production act):** scope Gutterfunk `blocklist { Jus Now }` + enable; the re-walk fires (~10–12 h at the measured ceiling); verify 124/130 recordings, counters, board. Note: Gutterfunk has **no `labels` row in the seeded dev DB** — the pilot runs against prod after a crawl mints it, or the row is seeded. Abort path: `--scope open` + let the frontier drain. Pre-existing off-lane rows on the label are checked and, if present, pruned via fluncle-catalogue-prune as part of pilot acceptance (scope is forward-only; the pilot must not leave the operator asking "why is the soca still here").
+1. **PR 1 — the re-arm unit:** `scope_changed_at` + `rearmed_at` columns, enable-path stamp, `rearmScopedLabelReleases` + `rearmAllowedArtists` in the tick, enqueue re-arm mode, `--rewalk`, and the enable-after-walk test that does not exist today.
+2. **PR 2 — schema + gate:** `artist_rules`, the memo, the verdict filter (inert until rules exist; tests seed by direct insert), counters, pass note.
+3. **PR 3 — contracts + CLI** (all ops above, merge behaviour, bridge resolution at write).
+4. **PR 4 — tap awareness** (parseProbeTrack ids + the write-leg check + tap-blind accounting).
+5. **PR 5 — admin surfaces** (labels dialog + chips + queued count; artists global actions; smokes).
+6. **PR 6 — triage skill** (repo-only; `skills:install`).
+7. **PR 7 — the pilot (operator-gated production act):** global-block **Jus Now** (`3ae210f7…`, bridge id `0iT2o4MNsBKSLy7bllgdo0`) + plain-enable **Gutterfunk**. Prod verified: the label row exists (undecided, correct MBID) with **zero stored tracks** — clean slate, empty prune leg, no capture exposure. Acceptance: back catalogue arrives via the re-walk; Jus Now first-credit records refused (`tracksSkippedArtistRule` visible); 124/130 recordings stored incl. both Gypsy Woman mixes.
+8. **PR 8 — the backfill (operator-gated):** stamp `scope_changed_at` on all enabled labels; monitor the drain in the ledger.
 
-## 11. Doc/canon fan-out (six surfaces, one restatement)
+## 11. Doc/canon fan-out
 
-The doctrine drift is real (schema.ts:3428 "never storage" vs crawl.ts:1150 "gates STORAGE") and the draft's fix was wrong — `seed_state` also drives capture spend and the tap, so "governs what the next crawl writes" would create fresh drift with the-ear.md's ratified acquisition framing. The restatement, everywhere it lands:
+The acquisition-axis restatement (everywhere): _A ruling and its artist rules govern what Fluncle **acquires** next — what the crawler seeds from, what it takes, and what audio gets bought. Nothing ever changes what is already stored._ Surfaces: docs/label-entity.md (the exception model + MB-alternative rule + restatement) · docs/catalogue-crawler.md (gate, exceptions, re-arms, counters; fix its "two layers" → three) · docs/the-ear.md (capture untouched in v1, pointer to 9.4) · docs/admin-shell.md (the verbatim "crawl scope, never storage" line + Labels/Artists placement rows) · labels.tsx header + on-page paragraph · docs/artist-relationship.md (global rules live on the artist entity's surface) · fluncle-catalogue-prune SKILL.md (the retroactive remedy).
 
-> _A ruling and a scope govern what Fluncle **acquires** next — what the crawler seeds from, what it stores, and what audio gets bought. Neither ever changes what is already stored._
+## 12. Acceptance criteria (named tests)
 
-Surfaces: docs/label-entity.md (scope section + MB-alternative rule + restatement) · docs/catalogue-crawler.md (gate, counters, re-arm; also fix its "two layers" — the code implements three) · docs/the-ear.md (per Decision 2) · docs/admin-shell.md (the verbatim "crawl scope, never storage" line + the Labels placement row) · labels.tsx's header comment + on-page paragraph · fluncle-catalogue-prune's SKILL.md (named as the retroactive remedy).
+- crawl.integration.test.ts @ :620 describe — enable-after-walk re-arm stores previously refused releases; second re-arm pass is a no-op (watermark terminates); re-arm resets hop + label_slug; re-arm skips Bootleg, keeps status-absent; tail re-arm still one-ticks on nothing-new; fold-colliding enabled labels never share rules (default-only + logged); block-FIRST drops the act's record, keeps the guest feature; a no-identity credit falls to the label default (both directions); **an allow stores a billed record from a disabled label and skips the same artist's guest credit**; an allowed artist's node is minted/revived and daily-re-armed; a fully-excluded release mints no album row; the artist-hop leg still enqueues from excluded credits; widening re-walk stores only newly permitted rows (album-title twins excepted); credit-order stability.
+- labels.test.ts — merge drops loser rules + reports `droppedRules`; rule writes leave `ruled_at` untouched; restale fires only with `seedState`.
+- label-releases tests — tap drops a first-credit-blocked Spotify id; keeps on null bridge; allowed artists don't affect the tap.
+- Contract gates (naming/admin-coverage/auth-coverage), `cli.test.ts` stringOptions, full apps/cli run; smokes via `smoke:routine`; all §11 docs; `skills:install`.
+- Pilot + backfill per §10.7–10.8.
 
-## 12. Acceptance criteria
+## Decision record (interview, 2026-08-01→02 — all resolved)
 
-Named tests (the load-bearing set):
-
-- `crawl.integration.test.ts` @ the :620 describe — `"stores a previously gate-refused release once its label is ENABLED — the back-catalogue re-arm"` (drain → enable → re-arm → drain; **not** a fresh-DB cold walk, which is why the gap has no test today); `"a second re-arm pass is a no-op — the watermark terminates it"`; `"the re-arm resets hop and label_slug so revived nodes are picked"`; `"a re-arm skips Bootleg and keeps status-absent releases"`; `"the tail re-arm still stops in one tick when nothing is new"` (guards the enqueue-mode gating); `"two enabled labels that fold together never share a scope"`; `"a blocklist drops on the FIRST credit and keeps the guest feature"`; `"a blocklist keeps a candidate whose credits carry no MBID"`; `"a fully-filtered release mints no albums row"`; `"the artist-hop leg still enqueues from filtered-out credits"`; `"a widening re-walk stores only newly permitted rows (album-title twins excepted)"`; credit-order stability.
-- `labels.test.ts`: merge 409 on differing modes; loser rules dropped + `droppedRules` reported; scope-only write leaves `ruled_at` untouched; restale fires only with `seedState` present.
-- Contract gates: orpc-naming / orpc-admin-coverage / orpc-auth-coverage; `cli.test.ts` stringOptions; full `apps/cli` run.
-- Board/dialog: shell + touch + queue smokes green via `smoke:routine`.
-- Docs: all six §11 surfaces; `skills:install` run.
-- Pilot: §10.6 verified end-to-end, counters visible, no soca stored post-re-walk, pre-existing off-lane rows pruned.
-
-## Decisions needed BEFORE handoff
-
-1. **Blocklist-only v1** — confirm (the panel's case: no proven allowlist customer; fail-open safety; Gutterfunk needs exactly this). Rejecting it reopens §9.1's gates now.
-2. **Scope × capture spend.** Enabling scoped Gutterfunk makes its stored rows capture-authorized at the seed-label tier — including any already-stored off-scope rows — and the capture ladder keys on `artists.id`/label, so an exact scope veto is structurally unreachable until credit MBIDs are persisted (§9.2). Recommended v1 ruling: **scope is storage-only; capture untouched; the pilot prunes pre-existing off-scope rows so there is nothing mis-authorized to buy** — stated in the-ear.md; revisit as a veto when §9.2 lands. The alternative (best-effort `artists.mbid` join veto now) buys partial coverage at the cost of a false sense of exactness.
-3. **Re-arm trigger** — automatic in the crawl tick on enable/widening + `--rewalk` manual (recommended); or manual-only.
-4. **Blocklist share threshold Y** for triage proposals (default 15 % of recordings by first credit).
-5. **The global artist verdict** (off-lane-everywhere acts) — park until Decision 2's revisit, since it is the same question as capture authorization wearing a different hat; the park is safe once 2 is ruled.
+1. Exception model (2 scopes × 2 verdicts), no label modes — **ratified** (supersedes v1's blocklist-only Q1).
+2. Capture untouched in v1; storage-only; pilot's clean slate removes exposure — **ratified**.
+3. Re-arms automatic (label enable/rule change; allow-artist walks; daily allowed-artist freshness) + `--rewalk` — **ratified**.
+4. Triage block-share threshold Y = 15 % — **ratified**.
+5. Pilot = global-block Jus Now + plain-enable Gutterfunk — **ratified**.
+6. Backfill all enabled labels post-PR 1 — **ratified**.
+7. Scope-aware tap via the Spotify-id bridge (operator's design) — **ratified**.
+8. Agents propose per-label rules (both verdicts) with evidence; operator ratifies; globals operator-authored (prose suggestions only) — **ratified**.
+9. Vocabulary: take/Except/Only/Never/Always set — **ratified**.
+10. Build starts on operator trigger — **not before**.
 
 ## Risks & open questions
 
-- Frontier contention: a big re-walk competes for the 15 release slots/tick; visible via `releasesRearmed` + the ledger; bounded by the watermark batches.
-- MB entity drift (merges silent-but-benign via response-id comparison; **splits** silently stop matching — surfaced only by the re-audit's first-credit counts; stated, accepted for v1).
-- Operator model: one mode in v1 keeps the mental object simple; the chip + sentence carry the meaning; the dialog states the two boundaries (forward-only; tap trade-off).
-- The alias blind spot on the gate (a confirmed alias spelled differently by MB is gate-refused today) predates this RFC — noted in §3.1, not widened by it, and worth its own small fix later.
+- Frontier contention during the backfill drain (visible via `releasesRearmed` + ledger; bounded batches).
+- MB entity drift (merges benign via response-id comparison; splits surfaced by the rescope sweep's counts).
+- Allow-set completeness (collab entities) — census expansion + ratification counts mitigate; a missed alias under-imports, never mis-imports.
+- The gate's pre-existing alias blind spot (confirmed alias spelled differently by MB is refused on an enabled label) — predates this RFC, unchanged by it, worth its own fix.
 
 ## Appendix — verifications & sources
 
-**Panel-verified live (2026-07-31):** Gutterfunk census 37/133/130/50 (payloads in the session scratchpad: `gf_browse_rec.json`, `gf_rels.json`, `census.tsv`); VA-comp credits (`729b130c`); block-quantifier tables re-measured (ANY 9 / ALL 3-with-4-leaks / FIRST 7); Maddslinky first-credit count = 0; `Gypsy Woman (DieMantle RaveYard mix)` credited solely to Crystal Waters with a recording-level `remixer` rel to DieMantle (falsifying the draft's "no remixer data upstream" and its pilot list); remixer-rels payload cost +2.8 %; browse status behaviour (`&status=official` drops status-absent releases); Med School = MB Imprint `a44a51ea` with a `label ownership` edge to Hospital, both already enabled Fluncle rows; Hospital = 1,019 MB releases; 70-MBID drift probe (0 merges observed); deployed crawl budget `FLUNCLE_CRAWL_NODES=30`, release half-batch 15, cadence ~10.75 min.
-**Panel-verified in source:** every crawl.ts/labels.ts/schema.ts line cited above re-checked by two reviewers; mergeLabel's 8-statement batch; `settle`'s unconditional `done_at`; the per-isolate MB rate gate and its 2026-07-19 incident note; `LabelMergeRow`; the one partial `'enabled'` index; `orpc-naming`'s verb list (`replace` in, `rearm` absent — moot, no such op ships); `/admin/labels` absent from touch-smoke `SURFACES`; migration shape vs `0141`/`0144` precedents.
-**Overturned from the draft by the panel (kept for the record):** remixer data "structurally out of reach" (false — sparse); the Crystal Waters pilot entry (inverted a genuine record); the fold-keyed memo (namesake-unsound); the browse-in-the-write re-arm (rate-gate violation, no termination); the "~15 h from MB budget" arithmetic (wrong constraint, wrong node budget); "two partial indexes" (one); the split write ordering (superseded by atomicity); the DB-side dialog count (structurally near-empty); 52 artists (50); the doctrine restatement's axis (writes → acquisition).
-**External:** MusicBrainz Style/Artist_Credits · How_to_Identify_Labels · Label/Type · label-label relationship types (all July 2026).
+**Interview round (2026-08-01→02):** prod Gutterfunk row `lbl_16f6f120…` undecided, mb `c7a4f6d6…`, 0 stored tracks, 0 raw-string matches; Jus Now MB artist `3ae210f7…` carries Spotify url-rel `0iT2o4MNsBKSLy7bllgdo0` (the bridge proof); tap album parse keeps Spotify artist ids (label-releases.ts:312) while `parseProbeTrack` discards per-track ids it receives (:334); artist-hop discovery leg runs regardless of storage (crawl.ts:1365); `record_demand` re-orders, never stores (demand.ts); qualified-artists SQL authorizes capture only (catalogue.ts:815–880); non-test `tracks` writers = crawl.ts, label-releases.ts, publish.ts.
+**Panel round (2026-07-31):** census 37/133/130/50 with corrected quantifier tables; Maddslinky first-credit = 0; Gypsy Woman = DieMantle remix credited solely to Crystal Waters (remixer rel verified; +2.8 % inc cost); browse status behaviour; Med School Imprint + `label ownership` edge; Hospital = 1,019 releases; deployed crawl budget 30 / release half-batch 15 / cadence ~10.75 min; 70-MBID drift probe (0 merges); mergeLabel's 8-statement batch; per-isolate MB rate gate + 2026-07-19 incident; `settle`'s unconditional `done_at`; the one partial `'enabled'` index; migration shape precedents; `/admin/labels` absent from touch-smoke.
+**Overturned in v1→v2:** label modes (superseded); tap exclusion (superseded by the bridge); "remixer data doesn't exist" (sparse, not absent); the browse-in-the-write re-arm; fold-keyed memo; the DB-side dialog count; the write-ordering ritual; the ~8-artist cap (share test); the doctrine axis (writes → acquisition).
+**External:** MusicBrainz Style/Artist_Credits · How_to_Identify_Labels · Label/Type · label-label relationship types (July 2026).
