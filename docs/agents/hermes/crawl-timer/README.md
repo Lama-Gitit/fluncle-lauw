@@ -12,12 +12,12 @@ The box holds no MusicBrainz budget and no vendor identity; the Worker does. So 
 
 That split is what makes the cadence, not the batch size, the real throttle. **A catalogue crawl is a marathon the SCHEDULE finishes, not the process.** Every scrap of state is in the database, so "run again" and "resume" are the same command: a box reboot mid-label costs one node, not one crawl.
 
-- `FLUNCLE_CRAWL_NODES` (script default `10`, **set to `30` in the unit**) — frontier nodes per tick. Measured ~3s per node against a paced MusicBrainz, so a 30-node tick is ~90s. It rides the `docker exec` as `-e`; a systemd `Environment=` sets it on the host wrapper and never reaches the sweep.
+- `FLUNCLE_CRAWL_NODES` (script default `10`, **set to `60` in the unit**) — frontier nodes per tick. Measured ~3s per node against a paced MusicBrainz, so a 60-node tick is ~180s. It rides the `docker exec` as `-e`; a systemd `Environment=` sets it on the host wrapper and never reaches the sweep.
 - `FLUNCLE_CRAWL_MAX_HOP` (default `2`) — the ratified boundary gate: hop 0 = a release on an enabled seed label, hop 1 = an artist on it, hop 2 = a release that artist also appears on, then STOP.
 
-At 30 nodes every 10 minutes that is ~4,300 nodes/day — the neighbourhood of a seed label in a day or two, politely, with the vendor's rate budget never strained. A tick that finds the frontier drained is a cheap no-op.
+At 60 nodes every 10 minutes that is ~8,600 nodes/day — a seed label's neighbourhood in a day, politely, still a small fraction of what one compliant 1 req/s client may ask. A tick that finds the frontier drained is a cheap no-op.
 
-**Sizing it.** The ceiling is `TimeoutStartSec=600`, which also equals the cadence, so a pass must comfortably finish inside its own window: at ~3s/node the practical safe range is well under 100 nodes, and the margin exists for slow-MusicBrainz days (it flapped `/status` on 2026-07-13) and for pin-watch image builds stealing CPU. 10 was measured on 2026-07-26 at a 26–35s pass — a ~5% duty cycle while `frontier_pending` climbed past 90k, which is what prompted 30. Raise it when the frontier is growing faster than it drains; leave it when the bottleneck is upstream (an `undecided` label backlog gates STORAGE, and no amount of walking fixes that).
+**Sizing it.** The ceiling is `TimeoutStartSec=600`, which also equals the cadence, so a pass must comfortably finish inside its own window: at ~3s/node the practical safe range is well under 100 nodes, and the margin exists for slow-MusicBrainz days (it has flapped `/status` before) and for pin-watch image builds stealing CPU. The second bound is the SHARED MusicBrainz budget: the sibling MB sweeps ride the same serialized 1 req/s gate, so watch the run ledger's throttled-tick ratio after any raise — if most crawl ticks yield early, or the siblings start starving, the knob is past the contention point. Raise it when the frontier is growing faster than it drains; leave it when the bottleneck is upstream (an `undecided` label backlog gates STORAGE, and no amount of walking fixes that).
 
 ## The operator's steering wheel
 
