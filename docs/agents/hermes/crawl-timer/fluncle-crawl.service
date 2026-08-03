@@ -23,12 +23,15 @@ Type=oneshot
 # that says the value is too high. 60 nodes ≈ 180s (~30% duty cycle).
 ExecStart=/usr/bin/docker exec -u hermes -e HOME=/opt/data/home -e FLUNCLE_CRAWL_NODES=60 hermes bash /opt/hermes-scripts/crawl-sweep.sh
 # A PURE trigger — zero LLM tokens. One pass is ~3 MusicBrainz calls per node paced at ~1 req/s in
-# the Worker (measured ~3s/node, so ≈180s at 60 nodes), plus headroom for a Retry-After'd 503. The old 120s ceiling
-# false-killed a tick that merely overlapped a pin-watch docker image build (~4 min of heavy
-# CPU contention on this 4-vCPU box); 600s clears that window with room to spare. It equals
-# the 10-min cadence: systemd never starts a new tick while one is active, so an over-long
-# pass just skips the next trigger and self-heals — it is a backstop, never the normal path.
-TimeoutStartSec=600
+# the Worker (measured ~3s/node, so ≈180s at 60 nodes), plus headroom for a Retry-After'd 503.
+# The ceiling must fit the sweep's WORST case, not the nominal pass: the CLI caps one request at
+# 300s, and the sweep retries a timed-out call once, so a slow-MusicBrainz tick can legitimately
+# spend 300s (dead first call) + up to 300s (retry) — a 600s ceiling kills exactly that tick
+# mid-retry, before it can write its /status marker or an honest failure. 900s fits the full
+# retry envelope with margin. Past the 10-min cadence an over-long pass just eats the next
+# trigger (systemd never starts a new tick while one is active) and self-heals — this is a
+# backstop, never the normal path.
+TimeoutStartSec=900
 # Modest hardening for a root docker-driving oneshot.
 NoNewPrivileges=true
 ProtectControlGroups=true
