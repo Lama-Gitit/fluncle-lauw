@@ -74,11 +74,14 @@ import { adminAuth, operatorGuard } from "../orpc-auth";
 import { certifyExistingTrack } from "../publish";
 import { apiFault, type Implementer, parseBool, parseLimit } from "./_shared";
 
-// One crawl tick expands this many frontier nodes. Each node is ~1 MusicBrainz request paced
-// at ~1 req/s, so 10 is a ~12s tick — comfortably inside the Worker's budget and the cron's
-// timeout, with the frontier making the next tick pick up exactly where this one stopped.
+// One crawl tick expands this many frontier nodes. Each node costs ~3s of the paced ~1 req/s
+// MusicBrainz budget, and the whole pass runs inside ONE request — the sweep deliberately never
+// paginates (the CLI keepalive second-request trap). So the ceiling is bounded by the CLI's
+// 5-minute request timeout: 60 nodes ≈ 180s nominal, leaving ~2 minutes for Retry-After'd 503s.
+// The box timer's FLUNCLE_CRAWL_NODES must never exceed this clamp — a higher ask is silently
+// cut to the clamp, which reads in the ledger as a knob that mysteriously undershoots.
 const CRAWL_DEFAULT_LIMIT = 10;
-const CRAWL_MAX_LIMIT = 50;
+const CRAWL_MAX_LIMIT = 60;
 
 /**
  * `maxHop` needs its own parse: `parseLimit` floors at 1, and hop **0** is a legitimate

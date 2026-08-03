@@ -727,7 +727,7 @@ export const crawlCatalogue = oc
     z.object({
       query: z.object({
         dryRun: z.string().optional(),
-        /** Frontier nodes to expand this pass (default 10, clamped to 50). */
+        /** Frontier nodes to expand this pass (default 10, clamped to 60). */
         limit: z.string().optional(),
         /** Graph distance from a seed label (default 2, clamped to 3). */
         maxHop: z.string().optional(),
