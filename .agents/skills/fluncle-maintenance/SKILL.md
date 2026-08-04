@@ -1,6 +1,6 @@
 ---
 name: fluncle-maintenance
-description: "Keep Fluncle's pinned/baked supply chain current — the version-drift sweep over the Hermes image's pins (base image, bun, the fluncle CLI, the Claude Code CLI), the box.ascii render-box CLI, and the GitHub Actions tags. Ships the clearly-safe bumps END-TO-END (edit the pin → PR → CI green → merge); a baked Dockerfile pin then self-deploys via the on-box fluncle-pin-watch timer (rave-02): rebuild → pre-smoke → swap → auto-rollback. Brakes (reports, never ships) on anything risky — a major bump, the base image, or auth/runtime/model. Use whenever checking for version drift, bumping a pinned Hermes dependency, judging whether a base-image / CLI / Actions-tag bump is safe, SHA-pinning the workflow actions, merging a safe bump, or running the maintenance routine. NOT for the workspace dependency catalog freshness pass (the bunfig minimumReleaseAge flow), nor for changing what the agent may do or its voice (the fluncle-hermes-operator skill)."
+description: "Keep Fluncle's pinned/baked supply chain current — the version-drift sweep over the Hermes image's pins (base image, bun, the fluncle CLI, the Claude Code CLI), the box.ascii render-box CLI, and the GitHub Actions tags. Ships the clearly-safe bumps END-TO-END (edit the pin → PR → CI green → merge); a baked Dockerfile pin then self-deploys via the on-box fluncle-pin-watch timer (rave-02): rebuild → pre-smoke → swap → auto-rollback. Brakes (reports, never ships) on anything risky — a major bump, the base image, or auth/runtime/model. ALSO owns the dependency VULNERABILITY posture: the two advisory feeds (Dependabot + the report-only bun-audit CI workflow), the severity policy, the justified `--ignore` allowlist, and vulnerability-driven bumps sequenced by reachability. Use whenever checking for version drift, bumping a pinned Hermes dependency, judging whether a base-image / CLI / Actions-tag bump is safe, SHA-pinning the workflow actions, merging a safe bump, triaging a security advisory or the bun-audit findings, or running the maintenance routine. NOT for the routine freshness-only workspace catalog bump pass (the bunfig minimumReleaseAge flow with no advisory driving it), nor for changing what the agent may do or its voice (the fluncle-hermes-operator skill)."
 ---
 
 # Fluncle maintenance
@@ -22,7 +22,7 @@ This file is the doctrine and the decision map. The drift surface (file:line + c
 
 **Out of scope (separate flows — reference, do not duplicate):**
 
-- **The workspace dependency catalog freshness.** The repo's app/package deps live in `package.json` `workspaces.catalog` + each package's deps, governed by the `bunfig.toml` `minimumReleaseAge` (3-day) policy. Bumping those is a different, larger pass with its own gate — not this skill. This skill touches the **runtime pins** (the image + Actions), not the app dependency tree.
+- **The workspace dependency catalog freshness.** The repo's app/package deps live in `package.json` `workspaces.catalog` + each package's deps, governed by the `bunfig.toml` `minimumReleaseAge` (3-day) policy. Bumping those for freshness alone is a different, larger pass with its own gate — not this skill. This skill touches the **runtime pins** (the image + Actions) — and, as the one exception into the app dependency tree, **vulnerability-driven bumps** under the posture section below: when an advisory names a dependency, the triage and the fix ship through this skill's judgment, not the freshness pass.
 - **What the agent may do, its model, or its voice.** Those levers are the **`fluncle-hermes-operator`** skill (Worker role guards, `config.yaml`, `SOUL.md`). This skill only keeps the _toolchain versions_ current. The `fluncle-hermes-operator` skill is the reference for the box's run/smoke mechanics that the on-box pin-watch encodes; the maintenance routine does not drive those mechanics.
 
 ## The mental model: pins are deliberate, drift is silent, Opus is the gate
@@ -48,6 +48,26 @@ The whole loop, bounded to one pass:
    5. Fully-repo-side edits (Action SHA-pins, `package.json`, workflows) ship on the merge alone — no box step.
 5. **For the BRAKE items** — report the drift, the reason, and the bump-procedure pointer, so the operator decides and ships it themselves.
 6. **Stop.** One bounded pass per tick.
+
+## Dependency vulnerability posture (the two feeds)
+
+This skill owns the standing policy for dependency vulnerabilities — the counterpart to the drift sweep: drift is silent staleness, an advisory is a named reason to move.
+
+**The feeds, and who reads them.** Two complementary feeds cover the whole surface: **Dependabot** (GitHub-native, watches the manifests it can parse, alerts on the default branch) and the **report-only `dependency-audit.yml` workflow** (`bun audit` over `bun.lock`, so it sees the transitive surface Dependabot cannot parse; runs on PRs, main pushes, and weekly). Neither feed pages anyone: they are READ on every maintenance pass — a pass begins by checking both — and the weekly scheduled run plus Dependabot's alert badge are the between-pass backstop. A pass that finds new advisories triages them then and there.
+
+**The severity policy — reachability first, severity second.** Sequence findings by where the vulnerable code EXECUTES, not by advisory count:
+
+1. **Reachable on the deploy runner or the Worker runtime path** (anything `vite`/`wrangler`/`@tanstack/react-start`/the build chain pulls in): a high/critical fix ships promptly through a SHIP-classified bump, and MAY jump the 3-day `minimumReleaseAge` quarantine — the quarantine guards against fresh-release supply-chain attacks, and a targeted advisory fix is the opposite trade; still prefer the oldest release that carries the fix.
+2. **Local-only tooling** (lint, editor, docs, Raycast, Expo dev chains): rides the normal cadence; the quarantine holds.
+3. **Prefer bumping the direct parent** over pinning a transitive; a `resolutions`/`overrides` pin is a fork of someone else's tree and carries a comment naming when it can be dropped.
+4. **Nothing auto-merges.** Renovate automerges nothing here; every vulnerability-driven bump goes through the same SHIP/BRAKE judgment and green-CI gate as a pin bump.
+
+**The `--ignore` allowlist.** The allowlist lives in the root `audit` script (`package.json`), so local runs and CI report the same residual set. An entry is admitted only with a justification recorded here, and every pass re-checks that the justification still holds (an upstream fix retires the entry). The current entries:
+
+- `GHSA-f88m-g3jw-g9cj` (sharp, libvips CVEs): build-time image tooling; miniflare pins sharp exact, so the fix arrives with routine wrangler bumps and cannot be forced from this tree.
+- `GHSA-xcpc-8h2w-3j85` (adm-zip, crafted-ZIP memory allocation): unreachable — it unpacks only onnxruntime's own archives at install time, never untrusted input.
+
+**The blocking flip (operator-gated).** `dependency-audit.yml` currently carries `continue-on-error: true`. The flip — removing it, and optionally marking the check required — is the operator's PR-gate contract change, and its precondition is a clean residual: every non-allowlisted high drained via parent bumps. Advisory drift can redden `main` without a code change, so the flip is deliberately his call, not a pass's.
 
 ## Safety doctrine
 

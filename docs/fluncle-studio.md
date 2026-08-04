@@ -109,18 +109,11 @@ The box drives everything with its **agent-scoped** `FLUNCLE_API_TOKEN`, so the 
 
 ## Box deploy (operator)
 
-Deploy the cron scripts with `docker cp` into the running container.
+The sweep deploys the same way every other box cron does — nothing is copied into a running container by hand.
 
-1. The CLI and ffmpeg come from the Hermes image; the clip cut requires no fonts.
+1. **The scripts are baked, not copied.** `clip-sweep.{sh,ts}` ride the Hermes image at `/opt/hermes-scripts/` (`docs/agents/hermes/Dockerfile`), and the on-box `fluncle-pin-watch` timer rebuilds and swaps the container whenever a baked file changes on `main` — so merging a script edit IS the deploy. (`clip-drip-sweep.sh` is deliberately stripped from the bake until the drip is un-parked.) The CLI and ffmpeg come from the image; the clip cut requires no fonts.
 
-2. **Copy the cron pair into the container** (the `docker cp` to `hermes:/opt/data/scripts/` reality):
-
-   ```bash
-   docker cp clip-sweep.sh hermes:/opt/data/scripts/clip-sweep.sh
-   docker cp clip-sweep.ts hermes:/opt/data/scripts/clip-sweep.ts
-   ```
-
-3. **Schedule it** (the agent token already lives in the cron env — no operator token, since the ops are agent tier): the sweep ships as the `studio-clip-timer` host systemd timer (`fluncle-studio-clip`), a repo-checked-in `.timer`/`.service` pair installed by [`docs/agents/hermes/install-host-timers.sh`](./agents/hermes/install-host-timers.sh). Per-run output is a freshness marker the sweep self-writes under `~/.hermes/cron/output/fluncle-studio-clip/` (read by the `/status` prober).
+2. **Schedule it** (the agent token already lives in the cron env — no operator token, since the ops are agent tier): the sweep ships as the `studio-clip-timer` host systemd timer (`fluncle-studio-clip`), a repo-checked-in `.timer`/`.service` pair installed by [`docs/agents/hermes/install-host-timers.sh`](./agents/hermes/install-host-timers.sh). Per-run output is a freshness marker the sweep self-writes under `~/.hermes/cron/output/fluncle-studio-clip/` (read by the `/status` prober).
 
 Install the timer only after the box's pinned CLI supports `fluncle admin clips cut`.
 
