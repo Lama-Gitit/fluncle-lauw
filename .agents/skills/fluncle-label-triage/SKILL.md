@@ -41,10 +41,10 @@ Four rails hold in every round:
 ### 1 · Pull the pile
 
 ```bash
-bash <skill>/scripts/pull-undecided.sh [--exclude held-slugs.txt] > undecided.json
+bash <skill>/scripts/pull-undecided.sh > undecided.json
 ```
 
-Emits every `undecided` label with its **`mb_label_id`** (load-bearing: agents research the EXACT MusicBrainz entity, never a same-named label — "Absolute" the Swedish pop-comp brand is not "Absolute 2 Records" the UK jungle label), its stored-track count, and any **artist rules it already carries** (an undecided label can hold allows from a prior `dnb_partial` round). It also refreshes, in CWD:
+Emits every `undecided` label with its **`mb_label_id`** (load-bearing: agents research the EXACT MusicBrainz entity, never a same-named label — "Absolute" the Swedish pop-comp brand is not "Absolute 2 Records" the UK jungle label) and its stored-track count. It also refreshes, in CWD:
 
 - `calib-enabled.txt` / `calib-disabled.txt` — the operator's LIVE ruling boundary.
 - `calib-rules.txt` — every ratified artist rule, one line each, with its scope and tap-bridge state: the precedent a proposal is calibrated against.
@@ -52,7 +52,9 @@ Emits every `undecided` label with its **`mb_label_id`** (load-bearing: agents r
 
 The DB read is required: it carries the stored-track counts and the whole-corpus calibration in one query.
 
-`--exclude` skips slugs the operator is holding for their own ear (prior rounds' `unclear`). Skipping the flag is safe — a re-triaged held label just comes back `unclear` again — it only spends tokens.
+**One exclusion, and it is the only one.** An `undecided` label CARRYING ARTIST RULES is a settled `dnb_partial` — writing allows and leaving the seed state alone IS that verdict — so the pull skips it and names it on stderr. The check is exact rather than a heuristic: an undecided label has no other way to acquire per-label rules. Re-triaging one would spend tokens re-deriving a ruling that exists, and applying the result would re-PUT a whole-set swap over rules the operator may have since hand-tuned.
+
+**There is deliberately no hold list.** Everything else undecided is triaged every round, a prior round's `unclear` included. A hold is a snapshot of a judgment, and a hand-maintained one drifts silently until it skips labels that were settled and misses labels that were not. Re-triage is cheap and self-correcting: a still-unclear label costs one slice of a research batch and comes back unclear, while a label held pending an upstream MusicBrainz split — or pending a global rule that moves its share test — RESOLVES ITSELF the first round after the fix lands, instead of waiting for someone to remember it. Do not reintroduce a slug file; if a deferral ever needs to be first-class, it belongs in the DB next to `seed_state`, which today cannot tell "never seen" from "looked at and deferred".
 
 ### 2 · Fan out the research
 
