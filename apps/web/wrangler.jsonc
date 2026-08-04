@@ -51,6 +51,15 @@
     // back to the code default, a non-reasoning model with no reasoning field.
     "OPENROUTER_SEARCH_MODEL": "openai/gpt-5.6-luna",
     "OPENROUTER_REASONING_EFFORT": "low",
+    // The context-distil model (lib/server/observation.ts distilContextNote), non-secret
+    // config. Benched on the frozen corpus (scripts/bench-context-distil.ts, k=3 at prod
+    // temperature): luna-medium beats the haiku code default on hallucination tripwires
+    // and worn-texture avoidance at ~8× less per note; haiku keeps a recall edge, ruled
+    // the lesser failure for internal fuel feeding voice surfaces. The pair travels
+    // together: set both or delete both — deleting both falls back to the code default,
+    // a non-reasoning model with no reasoning field.
+    "OPENROUTER_CONTEXT_MODEL": "openai/gpt-5.6-luna",
+    "OPENROUTER_CONTEXT_EFFORT": "medium",
   },
   // Media Transformations (playback renditions): the web playback surfaces request
   // same-zone /cdn-cgi/media renditions of each master (lib/media.ts). These require
