@@ -1,8 +1,226 @@
 [
   {
-    "trackId": "...",
-    "expectedFacts": ["..."],
-    "forbiddenClaims": ["..."],
+    "trackId": "mb_c87e324c-7db9-459f-b123-964ef8585666",
+    "expectedFacts": [
+      "released on RAM Records in 2018",
+      "featured on the RAM Drum & Bass Annual 2019",
+      "mixed by Mob Tactics"
+    ],
+    "forbiddenClaims": ["Noel Gallagher", "Oasis", "founded by Andy C"],
+    "appleFuel": false
+  },
+  {
+    "trackId": "6VTelWLzGHWNojdCaHwFhC",
+    "expectedFacts": [
+      "Cambridge-based producer and DJ",
+      "mainstay of Hospital Records since 2003",
+      "A&R at Hospital Records and engineer at NT Mastering"
+    ],
+    "forbiddenClaims": ["brother of Logistics", "released in 2008", "Metalheadz"],
+    "appleFuel": false
+  },
+  {
+    "trackId": "mb_168f7471-6ce1-4259-805c-5fd4c34bdb25",
+    "expectedFacts": [
+      "Brazilian-born Urbandawn",
+      "an unexpected addition to the Hospital Records roster",
+      "previously unknown in drum & bass"
+    ],
+    "forbiddenClaims": ["Sao Paulo", "released in 2015", "Med School"],
+    "appleFuel": false
+  },
+  {
+    "trackId": "mb_dc39280d-3b69-44a1-b940-e7b78f57e2d3",
+    "expectedFacts": [
+      "eighth studio album",
+      "released via Hospital Records",
+      "released 26 March 2026",
+      "Cambridge-based producer"
+    ],
+    "forbiddenClaims": ["Matt Gresham", "brother of Nu:Tone", "Reality Checkpoint"],
+    "appleFuel": false
+  },
+  {
+    "trackId": "26S8Fsh6hK9YkihOpGh3FU",
+    "expectedFacts": ["Integral Records 2020", "taken from GLOW/5"],
+    "forbiddenClaims": ["founded by Break", "based in Bristol", "Hospital Records"],
+    "appleFuel": false
+  },
+  {
+    "trackId": "4m7qxTZ8NLLIyqGlrABAYq",
+    "expectedFacts": [
+      "Pacific EP title track",
+      "released on Shogun Audio",
+      "next generation producers"
+    ],
+    "forbiddenClaims": ["founded by Friction", "released in 2019", "Metalheadz"],
+    "appleFuel": false
+  },
+  {
+    "trackId": "5l1KPMsuhpp3aE4UoK8Hzx",
+    "expectedFacts": ["released on 29 May 2026"],
+    "forbiddenClaims": ["Nick Douwma", "RAM Records", "EMI"],
+    "appleFuel": false
+  },
+  {
+    "trackId": "2AUVVfU9CmmbWcudIAJ5vD",
+    "expectedFacts": [
+      "Tomorrowland Music 2025",
+      "originally by Delerium featuring Sarah McLachlan",
+      "fuses Dimension's signature sound with Summit's dancefloor energy"
+    ],
+    "forbiddenClaims": [
+      "Tiesto In Search of Sunrise",
+      "Lilith Fair",
+      "Front Line Assembly",
+      "released in 1997"
+    ],
+    "appleFuel": false
+  },
+  {
+    "trackId": "3ik30gwEMowx9V0tSLBc6A",
+    "expectedFacts": ["spiration music", "released 27 April 2026"],
+    "forbiddenClaims": ["Liquicity", "Hospital Records", "British producer"],
+    "appleFuel": false
+  },
+  {
+    "trackId": "3PvpLJrCDb9eQFtTzHmzgi",
+    "expectedFacts": ["Lexurus remix of Take Me Away", "debut album Ascension"],
+    "forbiddenClaims": ["Liquicity", "Dutch producer", "Hospital Records"],
+    "appleFuel": false
+  },
+  {
+    "trackId": "4N7jhOTacFaofcBi5Xo4CZ",
+    "expectedFacts": [
+      "released on R.O.A.M in 2026",
+      "part of the album TENMOREYEARS",
+      "struggles with addiction"
+    ],
+    "forbiddenClaims": ["Welsh word for longing", "Hospital Records", "Liquicity"],
+    "appleFuel": false
+  },
+  {
+    "trackId": "1uis7cCfM9Og8bbHkbytxy",
+    "expectedFacts": [
+      "taken from the album A Remedy For My Sorrow",
+      "sublabel Pilot",
+      "based in the Netherlands",
+      "debut album"
+    ],
+    "forbiddenClaims": ["metalcore", "Amsterdam", "Hospital Records"],
+    "appleFuel": false
+  },
+  {
+    "trackId": "1QMBCgCTDh6N6Gz6FqtHcU",
+    "expectedFacts": ["released on I99I in 2025", "played by Mollie Collins on Radio 1"],
+    "forbiddenClaims": [
+      "named after the year",
+      "jungle era of the early 1990s",
+      "Hospital Records"
+    ],
+    "appleFuel": false
+  },
+  {
+    "trackId": "4spwC84VcCxuHQzpjx5eMO",
+    "expectedFacts": [
+      "Calyx & TeeBee remix",
+      "Kerry Leva",
+      "appears on Anjunabeats presents Drum & Bass 01",
+      "released on Anjunabeats"
+    ],
+    "forbiddenClaims": ["Above & Beyond", "trance", "Noisia"],
+    "appleFuel": false
+  },
+  {
+    "trackId": "7KFkUYChoDVItgTnLMZFRD",
+    "expectedFacts": ["released on Hospital Records", "the flip side to Mermaids"],
+    "forbiddenClaims": ["experimental punk pop ambient", "Finnish producer", "released in 2007"],
+    "appleFuel": false
+  },
+  {
+    "trackId": "5qBkr45TSiCMMsVrwicIFk",
+    "expectedFacts": [
+      "title track of the Whole Place Lift / Plus single",
+      "Eva Lazarus",
+      "backed with the solo cut Plus",
+      "released 8 May 2026"
+    ],
+    "forbiddenClaims": ["Bristol", "RC Lens", "French city"],
+    "appleFuel": false
+  },
+  {
+    "trackId": "4kg1IYYvCtE09gPl5UHjjV",
+    "expectedFacts": [
+      "released in 2015 by Drum&BassArena",
+      "appears on the Summer Selection 2012 compilation",
+      "included on Summer Rewind"
+    ],
+    "forbiddenClaims": ["Robert Etheridge", "MTA Records", "Chase & Status"],
+    "appleFuel": false
+  },
+  {
+    "trackId": "37UQk2Zjmtg62TyPbV8UVF",
+    "expectedFacts": ["released on Pilot", "Raindrops On My Skin"],
+    "forbiddenClaims": ["guest mix", "Tokyo Prose", "released in 2021"],
+    "appleFuel": false
+  },
+  {
+    "trackId": "3q1wXCmNyWln6NGftyulnf",
+    "expectedFacts": ["released 26 October 2020 on Blu Saphir", "a 2020 Mix", "melancholic autumn"],
+    "forbiddenClaims": ["Hospitality", "Finnish producer", "Hospital Records"],
+    "appleFuel": false
+  },
+  {
+    "trackId": "59DlhKbekmtU8O7AtQ8q1w",
+    "expectedFacts": [
+      "Netsky's debut album on Hospital Records",
+      "released in 2010",
+      "vocals by Bev Lee Harling"
+    ],
+    "forbiddenClaims": ["Boris Daenen", "Belgian producer", "Liquicity"],
+    "appleFuel": false
+  },
+  {
+    "trackId": "7tqoT2vUQr9nXvrSZTqiD6",
+    "expectedFacts": [
+      "features vocalist Natalie Williams",
+      "Hospital Records 2007",
+      "Matrix & Futurebound remix",
+      "included on Hospitality: Drum & Bass 2010"
+    ],
+    "forbiddenClaims": ["Nu:Tone and Logistics are brothers", "jazz singer", "Viper Recordings"],
+    "appleFuel": false
+  },
+  {
+    "trackId": "7BFWtRkJESlaS3ilvZv86E",
+    "expectedFacts": [
+      "from the album In Stillness",
+      "his third studio album",
+      "released on Med School in 2018",
+      "Med School is a division of Hospital"
+    ],
+    "forbiddenClaims": ["Edward Allen", "debut album", "Liquicity"],
+    "appleFuel": false
+  },
+  {
+    "trackId": "6C9rGWJA9XGB9seVG0EpH9",
+    "expectedFacts": ["released on 29 Sep 2017", "part of the Alone In The Dark trilogy"],
+    "forbiddenClaims": ["Carlos Lima", "Brazilian", "Metalheadz"],
+    "appleFuel": false
+  },
+  {
+    "trackId": "1Ioc99Q7hXLcuotn0m2k5G",
+    "expectedFacts": [
+      "released on Atlantic Records UK in 2022",
+      "Maya Randle remix of Birdy's Wings"
+    ],
+    "forbiddenClaims": ["Skinny Love", "Bon Iver", "The Hunger Games", "Alchemist"],
+    "appleFuel": false
+  },
+  {
+    "trackId": "4zW1RpuyCIWdGSRd2iYa4x",
+    "expectedFacts": ["released on Hoofbeats Music", "Monochrome", "premiered by NEST HQ"],
+    "forbiddenClaims": ["Camo & Krooked", "released in 2019", "1990s R&B duo"],
     "appleFuel": false
   }
 ]
