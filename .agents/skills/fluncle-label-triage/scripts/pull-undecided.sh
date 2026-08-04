@@ -7,27 +7,14 @@
 # the stored-track counts and the whole-corpus calibration lists (the admin labels API pages), and
 # it is what lets a research agent hit the EXACT MusicBrainz entity instead of a same-named label.
 #
-#   pull-undecided.sh > undecided.json
+#   pull-undecided.sh [--exclude held-slugs.txt] > undecided.json
 #
-# THE ONE EXCLUSION, AND WHY IT IS THE ONLY ONE:
-# An `undecided` label that CARRIES ARTIST RULES is a settled `dnb_partial` — the operator ruled it
-# by writing allows and leaving the seed state alone, which is that verdict's whole shape. Those are
-# skipped: re-triaging one spends tokens to re-derive a ruling that already exists, and applying the
-# result would re-PUT a WHOLE-SET SWAP over rules he may have since hand-tuned. The check is exact,
-# not a heuristic — an undecided label has no other way to acquire per-label rules.
-#
-# Everything else undecided is triaged EVERY round, including labels a prior round returned
-# `unclear`. There is deliberately NO hold list. A hold is a snapshot of a judgment, and a
-# hand-maintained one drifts silently until it skips labels that were settled and misses labels that
-# were not (it did exactly that, twice). Re-triage is cheap and self-correcting: a still-unclear
-# label costs one slice of a research batch and comes back unclear, while a label held pending an
-# upstream MusicBrainz split, or pending a global rule that changes its share test, RESOLVES ITSELF
-# the first round after the fix lands instead of waiting for someone to remember it.
+# --exclude: one slug per line — labels the operator is holding for their own ear (prior rounds'
+# `unclear`). Optional; re-triaging a held label is harmless (it comes back unclear again).
 #
 # THE ARTIST-RULE OUTPUTS (the exception model, docs/label-entity.md):
-#   - each emitted row carries `rules: [...]`, empty by construction while the exclusion above
-#     holds — it is what that exclusion is decided ON, and it stays on the row so a deliberate
-#     re-triage of a partial has the standing exceptions in hand before proposing more.
+#   - each undecided row carries `rules: [...]` — an undecided/disabled label can already hold
+#     ALLOW rules (the dnb_partial shape), and a re-triage must see them before proposing more.
 #   - calib-rules.txt — the operator's RATIFIED rule precedent, one line per rule, for the
 #     research brief (agents calibrate proposals against rules he has already accepted).
 #   - calib-rules.json — the same set machine-readable: the input to `apply-rulings.py rescope`.
@@ -36,6 +23,11 @@
 # (the open-source posture — no concrete op:// path in this public script). Read-only by
 # construction: this script only ever SELECTs.
 set -euo pipefail
+
+EXCLUDE=""
+if [ "${1:-}" = "--exclude" ]; then
+  EXCLUDE="${2:?--exclude needs a file}"
+fi
 
 : "${FLUNCLE_TURSO_OP_ITEM:?set FLUNCLE_TURSO_OP_ITEM (see the private ops runbook)}"
 URL="$(op read "${FLUNCLE_TURSO_OP_ITEM}/TURSO_DATABASE_URL")"
@@ -110,13 +102,17 @@ for r in rules:
     if r['label_id']:
         by_label.setdefault(r['label_id'], []).append(
             {'artistMbid': r['artist_mbid'], 'artistName': r['artist_name'], 'verdict': r['verdict']})
-fresh, settled = [], []
+exclude = set()
+path = '''$EXCLUDE'''
+if path:
+    exclude = {l.strip() for l in open(path) if l.strip()}
+fresh = []
 for r in rows:
+    if r['slug'] in exclude:
+        continue
     r['rules'] = by_label.get(r['id'], [])
-    # Rule-carrying + undecided == a settled dnb_partial. The only exclusion; see the header.
-    (settled if r['rules'] else fresh).append(r)
-print(f'undecided: {len(rows)} | settled dnb_partial (skipped): {len(settled)} | to triage: {len(fresh)}', file=sys.stderr)
-if settled:
-    print('  skipped: ' + ', '.join(sorted(r['slug'] for r in settled)), file=sys.stderr)
+    fresh.append(r)
+ruled = sum(1 for r in fresh if r['rules'])
+print(f'undecided: {len(rows)} | excluded (held): {len(rows)-len(fresh)} | to triage: {len(fresh)} | already rule-carrying: {ruled}', file=sys.stderr)
 json.dump(fresh, sys.stdout, indent=0)
 "
