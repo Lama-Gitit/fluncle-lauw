@@ -133,12 +133,13 @@ function FunnelPage() {
 // ── The funnel band ────────────────────────────────────────────────────────────
 // Each stage is a real link to its operating surface (WCAG AA + keyboard reach: an anchor,
 // visible focus ring), drawn with an honest proportional-width bar. The bar is decorative;
-// the numbers beside it carry the meaning, so the bar is aria-hidden.
+// the numbers beside it carry the meaning, so the bar is aria-hidden. `stageBars` hands the rows
+// over sorted biggest-first, so the band tapers monotonically and an overtake reads as a reorder.
 
 function FunnelBand({ bars }: { bars: FunnelStageBar[] }) {
   return (
     <section aria-label="The funnel" className="space-y-3">
-      <BandHeading>The pipeline, crawl to certified</BandHeading>
+      <BandHeading>The pipeline, biggest stage first</BandHeading>
       <ul className="space-y-1.5">
         {bars.map((bar) => (
           <li key={bar.key}>
@@ -147,7 +148,8 @@ function FunnelBand({ bars }: { bars: FunnelStageBar[] }) {
         ))}
       </ul>
       <p className="text-xs text-muted-foreground">
-        Bar width is each stage against the widest. Open a stage to work it.
+        Stages run biggest to smallest; bar width is each against the widest. Open a stage to work
+        it.
       </p>
     </section>
   );

@@ -63,15 +63,17 @@ function snapshot(day: string, over: Partial<CatalogueSnapshotRow>): CatalogueSn
 }
 
 describe("stageBars", () => {
-  it("orders the stages crawl → certified and links each to its operating surface", () => {
+  it("orders the stages biggest-first and links each to its operating surface", () => {
     const bars = stageBars(STAGES, QUEUES);
 
+    // Descending by total, so the band tapers: anchored (500) outranks captured (400) even though
+    // it sits later in flow order.
     expect(bars.map((bar) => bar.key)).toEqual([
       "crawled",
+      "anchored",
       "captured",
       "analyzed",
       "embedded",
-      "anchored",
       "recEligible",
       "certified",
     ]);
@@ -81,6 +83,21 @@ describe("stageBars", () => {
       to: "/admin/catalogue",
     });
     expect(bars.find((bar) => bar.key === "certified")?.link).toEqual({ to: "/admin/findings" });
+  });
+
+  it("keeps flow order between stages that tie on total", () => {
+    const tied: FunnelStages = { ...STAGES, analyzed: 400, anchored: 400, captured: 400 };
+    const bars = stageBars(tied, QUEUES);
+
+    expect(bars.map((bar) => bar.key)).toEqual([
+      "crawled",
+      "captured",
+      "analyzed",
+      "anchored",
+      "embedded",
+      "recEligible",
+      "certified",
+    ]);
   });
 
   it("gives honest proportional widths against the widest stage", () => {

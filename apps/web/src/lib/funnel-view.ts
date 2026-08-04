@@ -108,10 +108,13 @@ export type FunnelStageBar = {
 };
 
 /**
- * The stage bars with honest proportional widths. Width is each stage's total as a fraction of
- * the WIDEST stage's total (so crawled — the biggest — reads full-width and the exits read as
- * the slivers they are). When every stage is empty the widest total is 0, so every width is 0 —
- * the guard that keeps an empty pipeline from dividing by zero.
+ * The stage bars with honest proportional widths, ordered BIGGEST FIRST. Width is each stage's
+ * total as a fraction of the WIDEST stage's total, and the rows are sorted by that same total —
+ * so the bars taper monotonically down the page and a stage that has overtaken the one ahead of
+ * it in flow order (anchoring outrunning capture, say) shows up as the reordering rather than
+ * hiding behind a bar that is wider than the one above it. Ties keep flow order (the sort is
+ * stable, and `STAGE_DEFS` is crawl → certified). When every stage is empty the widest total is
+ * 0, so every width is 0 — the guard that keeps an empty pipeline from dividing by zero.
  */
 export function stageBars(stages: FunnelStages, queues: FunnelLiveQueues): FunnelStageBar[] {
   const maxTotal = STAGE_DEFS.reduce((max, def) => Math.max(max, stages[def.key]), 0);
@@ -128,7 +131,7 @@ export function stageBars(stages: FunnelStages, queues: FunnelLiveQueues): Funne
       total,
       widthPct: maxTotal === 0 ? 0 : (total / maxTotal) * 100,
     };
-  });
+  }).sort((a, b) => b.total - a.total);
 }
 
 /** One stage's movement between two consecutive snapshots — how many rows crossed that day. */
