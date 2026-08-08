@@ -15,17 +15,23 @@ Type=oneshot
 # pin-watch); this host unit only TRIGGERS it, and the sweep self-writes its /status marker
 # (cron-output.sh). Secrets (the agent token + APIFY_API_TOKEN) come from the shared op-injected
 # ${HOME}/.fluncle-secrets.env the wrapper sources.
-ExecStart=/usr/bin/docker exec -u hermes -e HOME=/opt/data/home -e FLUNCLE_ANCHOR_BATCH=250 hermes bash /opt/hermes-scripts/anchor-sweep.sh
-# One tick drains 250 rows (`FLUNCLE_ANCHOR_BATCH`) — the sweep PAGES the worklist in ≤200-row reads
-# (the server clamp), so the batch may exceed one read's cap (anchor-sweep.ts `runAnchorSweep`,
-# 2026-07-26). Safe to run large because the FREE rungs (Deezer ISRC-recovery + ListenBrainz + Spotify
-# search) resolve most rows at zero Apify cost.
+ExecStart=/usr/bin/docker exec -u hermes -e HOME=/opt/data/home -e FLUNCLE_ANCHOR_BATCH=100 hermes bash /opt/hermes-scripts/anchor-sweep.sh
+# One tick drains 100 rows (`FLUNCLE_ANCHOR_BATCH`) — the sweep PAGES the worklist in ≤200-row reads
+# (the server clamp), so the batch may exceed one read's cap (anchor-sweep.ts `runAnchorSweep`).
+# The rungs themselves cost no Apify dollars; what bounds the batch is the SHARED Spotify app.
 #
-# 250 IS THE RULED VALUE (operator, 2026-07-29). This file had said 500 while a host drop-in
-# (fluncle-anchor.service.d/batch.conf) quietly pinned 250 — a drop-in wins, so the effective rate was
-# half of what the repo advertised, and reading the unit told you the wrong thing. The drop-in is
-# removed and this line is the single source; put the value HERE, never in a drop-in.
-# Measured 2026-07-29: a 250-row tick = 9.4 min (~2.3s/row) → 171 anchored / 79 missed / 0 Apify.
+# THE BATCH IS A BURST, AND THE BURST IS WHAT THE BREAKER SEES. Every ListenBrainz candidate spends
+# one Spotify by-id read on the shared official app, so a tick's row count IS its burst against that
+# app's rate budget. Past roughly this size the burst trips the shared throttle breaker
+# (lib/server/spotify-anchor-breaker.ts — 5 × 429 inside a 10-minute window), and that breaker's
+# cooldown is ONE HOUR: exactly this timer's cadence, so a single trip costs the whole NEXT tick
+# rather than the rest of this one. A tripped breaker also gates BOTH free rungs at once — the LB
+# by-id read AND the exact-ISRC ask — so a tick under a tripped breaker anchors nothing at all.
+# Fewer rows that resolve beat more rows that yield: raise this only against a ledger window showing
+# `lbYieldedOnBreaker` at zero across a full day.
+#
+# Put the value HERE, never in a `fluncle-anchor.service.d/` drop-in: a drop-in wins silently, and
+# then reading this unit tells you the wrong thing.
 # The 50-min timeout leaves generous headroom and still sits under the 1h cadence, so an over-long
 # tick just skips the next trigger and self-heals. Once the ready pool is dry the sweep no-ops on an
 # empty queue, so the batch is a ceiling rather than a spend.
