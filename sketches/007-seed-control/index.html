@@ -1,0 +1,446 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Fluncle — Seed Control Room</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Oxanium:wght@400;700;800&family=Space+Grotesk:wght@400;500;700&family=Monaspace+Krypton:wght@400;700&display=swap" rel="stylesheet" />
+<style>
+  :root {
+    --gold: #f5b800;
+    --glow: #ffd057;
+    --gold-veil: rgba(245, 184, 0, 0.10);
+    --ink-on-gold: #151006;
+    --deep-field: #090a0b;
+    --sleeve: #10100d;
+    --tape: #171611;
+    --cream: #f4ead7;
+    --stardust: #b7ab95;
+    --dust-veil: rgba(208, 185, 144, 0.10);
+    --dust-line: rgba(208, 185, 144, 0.16);
+    --red: #ff6b57;
+    --radius: 0.625rem;
+    --grain: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='120' height='120' filter='url(%23n)' opacity='0.5'/%3E%3C/svg%3E");
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: "Space Grotesk", ui-sans-serif, system-ui, sans-serif;
+    background: var(--deep-field);
+    color: var(--cream);
+    line-height: 1.25;
+    -webkit-font-smoothing: antialiased;
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+  .cosmos {
+    position: fixed; inset: 0; z-index: 0;
+    background:
+      var(--grain),
+      linear-gradient(rgba(9,10,11,0.55), rgba(9,10,11,0.8)),
+      url("cover.webp") center 30% / cover no-repeat;
+    background-blend-mode: overlay, normal, normal;
+    filter: saturate(0.9);
+  }
+  .cosmos::after {
+    content: ""; position: absolute; inset: 0;
+    background: radial-gradient(ellipse 60% 45% at 50% 30%, rgba(245,184,0,0.12), transparent 70%);
+    animation: breath 48s ease-in-out infinite;
+  }
+  @keyframes breath { 0%,100% { opacity: 0.6; } 50% { opacity: 1; } }
+  @media (prefers-reduced-motion: reduce) { .cosmos::after { animation: none; } }
+  .page { position: relative; z-index: 1; min-height: 100vh; display: flex; flex-direction: column; }
+
+  /* ── Top bar ─────────────────────────────────────────────────────── */
+  .topbar {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 0.9rem 1.5rem; gap: 1rem;
+    border-bottom: 1px solid var(--dust-line);
+    background: rgba(9,10,11,0.6);
+    backdrop-filter: blur(12px) saturate(125%);
+  }
+  .wordmark {
+    font-family: "Oxanium", sans-serif; font-weight: 800; font-size: 1.05rem;
+    letter-spacing: -0.02em; color: var(--cream); text-decoration: none;
+    display: flex; align-items: center; gap: 0.5rem; white-space: nowrap;
+  }
+  .wordmark .dot { color: var(--gold); }
+  .nav { display: flex; align-items: center; gap: 0.25rem; }
+  .nav a, .nav button {
+    font-family: "Space Grotesk", sans-serif; font-size: 0.875rem; font-weight: 500;
+    color: var(--stardust); text-decoration: none; background: none; border: none;
+    padding: 0.4rem 0.7rem; border-radius: 0.5rem; cursor: pointer;
+    display: inline-flex; align-items: center; gap: 0.3rem;
+    transition: color 150ms ease-out, background 150ms ease-out;
+  }
+  .nav a:hover, .nav button:hover { color: var(--glow); background: var(--gold-veil); }
+  .nav a.active { color: var(--cream); }
+  .nav .caret { font-size: 0.7rem; opacity: 0.7; }
+  .nav .builder { border: 1px solid var(--dust-line); background: rgba(23,22,17,0.5); }
+  .nav .builder:hover { border-color: var(--gold); }
+  .crew-btn {
+    font-family: "Space Grotesk", sans-serif; font-size: 0.875rem; font-weight: 700;
+    color: var(--ink-on-gold); background: var(--gold); border: none;
+    height: 2.25rem; padding: 0 0.875rem; border-radius: 0.5rem; cursor: pointer;
+    transition: background 150ms ease-out, transform 150ms ease-out;
+    white-space: nowrap;
+  }
+  .crew-btn:hover { background: var(--glow); }
+  .crew-btn:active { transform: translateY(1px); }
+
+  main { flex: 1; max-width: 76rem; width: 100%; margin: 0 auto; padding: 1.5rem; }
+
+  /* ── Status strip ─────────────────────────────────────────────────── */
+  .status-strip { display: grid; grid-template-columns: repeat(4, 1fr); gap: 0.9rem; margin-bottom: 1.5rem; }
+  .status-cell {
+    background: rgba(16,16,13,0.72);
+    backdrop-filter: blur(18px) saturate(125%);
+    border: 1px solid var(--dust-line); border-radius: var(--radius);
+    padding: 0.9rem 1rem;
+  }
+  .status-cell .k {
+    font-size: 0.72rem; font-weight: 800; color: var(--stardust);
+    display: flex; align-items: center; gap: 0.4rem;
+  }
+  .status-cell .k .pulse {
+    width: 7px; height: 7px; border-radius: 50%; background: var(--gold);
+    box-shadow: 0 0 8px var(--gold); animation: pulse 2.4s ease-in-out infinite;
+  }
+  @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.35; } }
+  @media (prefers-reduced-motion: reduce) { .status-cell .k .pulse { animation: none; } }
+  .status-cell .v {
+    font-family: "Oxanium", sans-serif; font-size: 1.5rem; font-weight: 800;
+    letter-spacing: -0.02em; font-variant-numeric: tabular-nums;
+    margin-top: 0.3rem; color: var(--cream);
+  }
+  .status-cell .v.gold { color: var(--gold); }
+  .status-cell .s { font-size: 0.78rem; color: var(--stardust); margin-top: 0.15rem; }
+
+  /* ── Hero: the seed anchor ────────────────────────────────────────── */
+  .hero {
+    position: relative; padding: 3.5rem 2rem; text-align: center;
+    border: 1px solid var(--dust-line); border-radius: var(--radius);
+    background:
+      radial-gradient(ellipse 70% 60% at 50% 0%, rgba(245,184,0,0.08), transparent 65%),
+      rgba(16,16,13,0.72);
+    backdrop-filter: blur(18px) saturate(125%);
+    margin-bottom: 1.5rem; overflow: hidden;
+  }
+  .hero::before {
+    content: ""; position: absolute; inset: 0; pointer-events: none;
+    background-image:
+      linear-gradient(to right, rgba(208,185,144,0.04) 1px, transparent 1px),
+      linear-gradient(to bottom, rgba(208,185,144,0.04) 1px, transparent 1px);
+    background-size: 36px 36px;
+  }
+  .hero-inner { position: relative; max-width: 56rem; margin: 0 auto; }
+  .hero-pill {
+    display: inline-flex; align-items: center; gap: 0.5rem;
+    background: var(--gold-veil); border: 1px solid rgba(245,184,0,0.3);
+    color: var(--glow); padding: 0.35rem 0.9rem; border-radius: 999px;
+    font-family: "Monaspace Krypton", monospace; font-size: 0.72rem;
+  }
+  .hero h1 {
+    font-family: "Oxanium", sans-serif; font-weight: 800;
+    font-size: clamp(1.9rem, 4.5vw, 3.2rem);
+    letter-spacing: -0.02em; line-height: 1.08;
+    color: var(--cream); margin-top: 1.2rem;
+  }
+  .hero h1 .grad {
+    background: linear-gradient(100deg, var(--glow), var(--gold) 55%, #d99a00);
+    -webkit-background-clip: text; background-clip: text; color: transparent;
+  }
+  .hero .sub { color: var(--stardust); font-size: 0.98rem; line-height: 1.45; max-width: 34rem; margin: 0.9rem auto 0; }
+  .seed-search { max-width: 40rem; margin: 1.8rem auto 0; position: relative; }
+  .seed-search .halo {
+    position: absolute; inset: -1px; border-radius: 0.75rem; pointer-events: none;
+    background: radial-gradient(120% 120% at 50% 0%, rgba(245,184,0,0.25), transparent 70%);
+    opacity: 0.5; transition: opacity 300ms ease-out;
+  }
+  .seed-search:focus-within .halo { opacity: 1; }
+  .seed-box {
+    position: relative; display: flex; align-items: center; gap: 0.6rem;
+    background: var(--tape); border: 1px solid rgba(245,184,0,0.35);
+    border-radius: 0.75rem; padding: 0.4rem 0.4rem 0.4rem 1rem;
+  }
+  .seed-box .mag { color: var(--gold); font-size: 1.05rem; }
+  .seed-box input {
+    flex: 1; background: transparent; border: none; outline: none;
+    color: var(--cream); font-family: "Space Grotesk", sans-serif;
+    font-size: 0.95rem; font-weight: 500; min-width: 0;
+  }
+  .seed-box input::placeholder { color: var(--stardust); }
+  .seed-box .go {
+    font-family: "Space Grotesk", sans-serif; font-size: 0.875rem; font-weight: 700;
+    color: var(--ink-on-gold); background: var(--gold); border: none;
+    height: 2.5rem; padding: 0 1.1rem; border-radius: 0.5rem; cursor: pointer;
+    display: inline-flex; align-items: center; gap: 0.45rem; white-space: nowrap;
+    transition: background 150ms ease-out, transform 150ms ease-out;
+  }
+  .seed-box .go:hover { background: var(--glow); }
+  .seed-box .go:active { transform: translateY(1px); }
+  .seed-presets {
+    display: flex; align-items: center; justify-content: center; flex-wrap: wrap;
+    gap: 0.5rem; margin-top: 0.9rem;
+    font-family: "Monaspace Krypton", monospace; font-size: 0.72rem; color: var(--stardust);
+  }
+  .seed-presets button {
+    font-family: "Monaspace Krypton", monospace; font-size: 0.72rem;
+    color: var(--stardust); background: var(--sleeve);
+    border: 1px solid var(--dust-line); border-radius: 0.5rem;
+    padding: 0.3rem 0.7rem; cursor: pointer;
+    transition: color 150ms ease-out, border-color 150ms ease-out, background 150ms ease-out;
+  }
+  .seed-presets button:hover { color: var(--glow); border-color: rgba(245,184,0,0.4); background: var(--gold-veil); }
+
+  /* ── Launch tiles ─────────────────────────────────────────────────── */
+  .tiles { display: grid; grid-template-columns: repeat(4, 1fr); gap: 0.9rem; margin-bottom: 1.5rem; }
+  .tile {
+    background: rgba(16,16,13,0.72);
+    backdrop-filter: blur(18px) saturate(125%);
+    border: 1px solid var(--dust-line); border-radius: var(--radius);
+    padding: 1rem; text-decoration: none; color: inherit;
+    display: flex; flex-direction: column; gap: 0.4rem;
+    transition: background 150ms ease-out, border-color 150ms ease-out;
+  }
+  .tile:hover { background: var(--gold-veil); border-color: rgba(245,184,0,0.4); }
+  .tile .t-icon { font-size: 1.1rem; color: var(--gold); }
+  .tile .t-name { font-weight: 700; font-size: 0.95rem; color: var(--cream); }
+  .tile .t-desc { font-size: 0.78rem; color: var(--stardust); line-height: 1.3; }
+  .tile .t-meta { font-family: "Monaspace Krypton", monospace; font-size: 0.7rem; color: var(--stardust); margin-top: auto; }
+
+  /* ── Feed panel ─────────────────────────────────────────────────── */
+  .panel {
+    background: rgba(16,16,13,0.72);
+    backdrop-filter: blur(18px) saturate(125%);
+    border: 1px solid var(--dust-line); border-radius: var(--radius);
+  }
+  .panel-head {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 0.9rem 1rem; border-bottom: 1px solid var(--dust-line);
+  }
+  .panel-head h2 { font-size: 0.95rem; font-weight: 800; color: var(--cream); }
+  .panel-head a { font-size: 0.8rem; font-weight: 600; color: var(--stardust); text-decoration: none; }
+  .panel-head a:hover { color: var(--glow); }
+  .feed { list-style: none; }
+  .track-row {
+    display: grid; grid-template-columns: 4.5rem 3rem 1fr 1.5rem; gap: 0.75rem;
+    align-items: center; padding: 0.8rem 1rem;
+    border-bottom: 1px solid rgba(208,185,144,0.12);
+    text-decoration: none; color: inherit;
+    transition: background 150ms ease-out;
+  }
+  .track-row:last-child { border-bottom: none; }
+  .track-row:hover { background: var(--gold-veil); }
+  .log-id { font-family: "Oxanium", sans-serif; font-size: 0.9rem; font-variant-numeric: tabular-nums; color: var(--stardust); transition: color 150ms ease-out; }
+  .track-row:hover .log-id { color: var(--glow); }
+  .art { width: 3rem; height: 3rem; border-radius: 6px; object-fit: cover; border: 1px solid var(--dust-line); transition: transform 150ms ease-out; }
+  .track-row:hover .art { transform: scale(1.06); border-color: rgba(245,184,0,0.5); }
+  .title-line { font-weight: 700; font-size: 0.98rem; line-height: 1.18; color: var(--cream); }
+  .meta-line { color: var(--stardust); font-size: 0.85rem; margin-top: 0.1rem; }
+  .chips { display: flex; gap: 0.35rem; margin-top: 0.3rem; flex-wrap: wrap; }
+  .chip { font-size: 0.7rem; font-weight: 500; color: var(--stardust); border: 1px solid var(--dust-line); border-radius: 0.3rem; padding: 0.08rem 0.35rem; background: rgba(16,16,13,0.5); }
+  .caret { color: var(--stardust); text-align: right; transition: transform 150ms ease-out, color 150ms ease-out; }
+  .track-row:hover .caret { transform: translateX(2px); color: var(--glow); }
+
+  footer {
+    border-top: 1px solid var(--dust-line); padding: 1rem 1.5rem;
+    display: flex; align-items: center; justify-content: space-between; gap: 1rem;
+    color: var(--stardust); font-size: 0.8rem;
+    background: rgba(9,10,11,0.6); backdrop-filter: blur(12px);
+  }
+  footer .links { display: flex; gap: 1rem; flex-wrap: wrap; }
+  footer a { color: var(--stardust); text-decoration: none; }
+  footer a:hover { color: var(--glow); }
+
+  @media (max-width: 1000px) {
+    .status-strip { grid-template-columns: repeat(2, 1fr); }
+    .tiles { grid-template-columns: repeat(2, 1fr); }
+  }
+  @media (max-width: 900px) {
+    .topbar { flex-wrap: wrap; }
+    .nav { order: 3; width: 100%; justify-content: center; flex-wrap: wrap; }
+  }
+  @media (max-width: 640px) {
+    .seed-box { flex-wrap: wrap; padding: 0.6rem; }
+    .seed-box .go { width: 100%; justify-content: center; }
+  }
+</style>
+</head>
+<body>
+<div class="cosmos" aria-hidden="true"></div>
+<div class="page">
+
+  <header class="topbar">
+    <a class="wordmark" href="#">Fluncle<span class="dot">'s</span> Findings</a>
+    <nav class="nav" aria-label="Main">
+      <a href="#" class="active">Launch Control</a>
+      <a href="#">Galaxy</a>
+      <a href="#">Listen</a>
+      <a href="#">Browse <span class="caret">▾</span></a>
+      <a href="#">Logbook</a>
+      <a href="#" class="builder">Builder</a>
+    </nav>
+    <button class="crew-btn" type="button">Join the crew</button>
+  </header>
+
+  <main>
+    <!-- Status strip -->
+    <section class="status-strip" aria-label="Archive status">
+      <div class="status-cell">
+        <span class="k"><span class="pulse"></span>Archive</span>
+        <div class="v gold">216</div>
+        <div class="s">findings logged</div>
+      </div>
+      <div class="status-cell">
+        <span class="k">Scanned</span>
+        <div class="v" style="font-size:1.15rem;line-height:1.2;padding-top:0.3rem">95,784</div>
+        <div class="s">tracks in the vector map</div>
+      </div>
+      <div class="status-cell">
+        <span class="k">Vector space</span>
+        <div class="v" style="font-size:1.15rem;line-height:1.2;padding-top:0.3rem">1024-dim</div>
+        <div class="s">embedding model</div>
+      </div>
+      <div class="status-cell">
+        <span class="k">Latest find</span>
+        <div class="v" style="font-size:1.05rem;line-height:1.2;padding-top:0.35rem">004.0.0K</div>
+        <div class="s">ring noord — Founder</div>
+      </div>
+    </section>
+
+    <!-- Hero: the seed anchor -->
+    <section class="hero">
+      <div class="hero-inner">
+        <span class="hero-pill">◉ Seed the map, find your sector</span>
+        <h1>Your taste, <span class="grad">mapped onto the Galaxy</span></h1>
+        <p class="sub">Type an artist or track you love. The engine reads 1024 dimensions of sound and returns the bangers orbiting closest to it.</p>
+        <div class="seed-search">
+          <div class="halo" aria-hidden="true"></div>
+          <div class="seed-box">
+            <span class="mag" aria-hidden="true">⌕</span>
+            <input id="seed-input" type="text" value="Sub Focus"
+                   placeholder="Enter an artist or track, e.g. Netsky, Sub Focus, Chase &amp; Status..." />
+            <button class="go" id="seed-go" type="button">Initialize <span aria-hidden="true">→</span></button>
+          </div>
+          <div class="seed-presets">
+            <span>Try seeding with:</span>
+            <button type="button" data-seed="Sub Focus">Sub Focus</button>
+            <button type="button" data-seed="Netsky">Netsky</button>
+            <button type="button" data-seed="Wilkinson">Wilkinson</button>
+            <button type="button" data-seed="Dimension">Dimension</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Launch tiles -->
+    <section class="tiles" aria-label="Launch destinations">
+      <a class="tile" href="#">
+        <span class="t-icon">◉</span>
+        <span class="t-name">Galaxy</span>
+        <span class="t-desc">Fly the map of every finding, star by star.</span>
+        <span class="t-meta">galaxy.fluncle.com</span>
+      </a>
+      <a class="tile" href="#">
+        <span class="t-icon">♪</span>
+        <span class="t-name">Listen</span>
+        <span class="t-desc">The full playlist, straight to Spotify.</span>
+        <span class="t-meta">216 tracks</span>
+      </a>
+      <a class="tile" href="#">
+        <span class="t-icon">▤</span>
+        <span class="t-name">Browse</span>
+        <span class="t-desc">Artists, albums, labels. The crates.</span>
+        <span class="t-meta">the taxonomy</span>
+      </a>
+      <a class="tile" href="#">
+        <span class="t-icon">☾</span>
+        <span class="t-name">Mixtapes</span>
+        <span class="t-desc">Fluncle dreaming. The checkpoints.</span>
+        <span class="t-meta">the long-term memory</span>
+      </a>
+    </section>
+
+    <!-- Feed -->
+    <section class="panel" aria-labelledby="feed-title">
+      <div class="panel-head">
+        <h2 id="feed-title">Latest findings</h2>
+        <a href="#">Full log →</a>
+      </div>
+      <ol class="feed">
+        <li><a class="track-row" href="#">
+          <span class="log-id">004.0.0K</span>
+          <img class="art" src="cover.webp" alt="" />
+          <span>
+            <span class="title-line">ring noord — Founder</span>
+            <span class="meta-line">Vision Recordings · 2026</span>
+            <span class="chips"><span class="chip">4:12</span><span class="chip">174 BPM</span><span class="chip">Fm</span></span>
+          </span>
+          <span class="caret" aria-hidden="true">›</span>
+        </a></li>
+        <li><a class="track-row" href="#">
+          <span class="log-id">004.0.1C</span>
+          <img class="art" src="cover.webp" alt="" />
+          <span>
+            <span class="title-line">ring noord — All Mine</span>
+            <span class="meta-line">Vision Recordings · 2026</span>
+            <span class="chips"><span class="chip">3:58</span><span class="chip">172 BPM</span><span class="chip">Am</span></span>
+          </span>
+          <span class="caret" aria-hidden="true">›</span>
+        </a></li>
+        <li><a class="track-row" href="#">
+          <span class="log-id">004.1.9E</span>
+          <img class="art" src="cover.webp" alt="" />
+          <span>
+            <span class="title-line">ring noord — Born Again (Lownoise)</span>
+            <span class="meta-line">Vision Recordings · 2026</span>
+            <span class="chips"><span class="chip">4:31</span><span class="chip">174 BPM</span><span class="chip">Dm</span></span>
+          </span>
+          <span class="caret" aria-hidden="true">›</span>
+        </a></li>
+        <li><a class="track-row" href="#">
+          <span class="log-id">004.4.3L</span>
+          <img class="art" src="cover.webp" alt="" />
+          <span>
+            <span class="title-line">ring noord &amp; The Upbeats — No Secret</span>
+            <span class="meta-line">Vision Recordings · 2026</span>
+            <span class="chips"><span class="chip">4:05</span><span class="chip">174 BPM</span><span class="chip">Em</span></span>
+          </span>
+          <span class="caret" aria-hidden="true">›</span>
+        </a></li>
+        <li><a class="track-row" href="#">
+          <span class="log-id">004.4.8B</span>
+          <img class="art" src="cover.webp" alt="" />
+          <span>
+            <span class="title-line">d:enigma — Bad Slander</span>
+            <span class="meta-line">Eatbrain · 2026</span>
+            <span class="chips"><span class="chip">3:47</span><span class="chip">175 BPM</span><span class="chip">Gm</span></span>
+          </span>
+          <span class="caret" aria-hidden="true">›</span>
+        </a></li>
+      </ol>
+    </section>
+  </main>
+
+  <footer>
+    <span>Fluncle's Findings · the archive of the Galaxy</span>
+    <div class="links">
+      <a href="#">About</a><a href="#">Logs</a><a href="#">Mixtapes</a><a href="#">Docs</a><a href="#">Radio</a>
+    </div>
+  </footer>
+</div>
+
+<script>
+  const input = document.getElementById("seed-input");
+  const go = document.getElementById("seed-go");
+  function applySeed(name) { input.value = name; }
+  go.addEventListener("click", () => {});
+  input.addEventListener("keydown", (e) => { if (e.key === "Enter") e.preventDefault(); });
+  document.querySelectorAll("[data-seed]").forEach((btn) => {
+    btn.addEventListener("click", () => applySeed(btn.dataset.seed));
+  });
+</script>
+</body>
+</html>
